@@ -28,11 +28,17 @@ import (
 	"github.com/piotrsenkow/mlsgrid-mcp/server"
 )
 
-const testSchema = "mlsgrid"
+const (
+	testSchema = "mlsgrid"
+	// testMarketSchema holds the B-M4 market/open-house fixture, kept separate
+	// so its rows never disturb the main seed's exact-count assertions.
+	testMarketSchema = "mlsgrid_market"
+)
 
 var (
-	testDSN     string
-	testAdapter *Adapter
+	testDSN           string
+	testAdapter       *Adapter
+	testMarketAdapter *Adapter
 )
 
 func TestMain(m *testing.M) {
@@ -64,29 +70,43 @@ func TestMain(m *testing.M) {
 		fmt.Fprintln(os.Stderr, "opening adapter:", err)
 		os.Exit(1)
 	}
+	testMarketAdapter, err = New(ctx, testDSN, Options{Schema: testMarketSchema})
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "opening market adapter:", err)
+		os.Exit(1)
+	}
 	code := m.Run()
 	_ = testAdapter.Close()
+	_ = testMarketAdapter.Close()
 	os.Exit(code)
 }
 
-// setupFixture applies the pinned contract migration and the seed into the test
-// schema on a single read-write connection. The migration uses unqualified
-// names, so search_path is pinned to the schema first — exactly how
-// mlsgrid-sync's migrator applies it.
+// setupFixture builds both test schemas: the main query-core seed and the B-M4
+// market/open-house seed, each from the pinned contract migration plus its seed.
 func setupFixture(ctx context.Context, dsn string) error {
+	if err := applySchema(ctx, dsn, testSchema, "testdata/contract/0001_init.sql", "testdata/seed.sql"); err != nil {
+		return err
+	}
+	return applySchema(ctx, dsn, testMarketSchema, "testdata/contract/0001_init.sql", "testdata/seed_market.sql")
+}
+
+// applySchema applies the given SQL files into schema on a single read-write
+// connection. The migration uses unqualified names, so search_path is pinned to
+// the schema first — exactly how mlsgrid-sync's migrator applies it.
+func applySchema(ctx context.Context, dsn, schema string, files ...string) error {
 	conn, err := pgx.Connect(ctx, dsn)
 	if err != nil {
 		return fmt.Errorf("connect: %w", err)
 	}
 	defer func() { _ = conn.Close(ctx) }()
 
-	if _, err := conn.Exec(ctx, "CREATE SCHEMA IF NOT EXISTS "+pgxQuoteIdent(testSchema)); err != nil {
-		return fmt.Errorf("create schema: %w", err)
+	if _, err := conn.Exec(ctx, "CREATE SCHEMA IF NOT EXISTS "+pgxQuoteIdent(schema)); err != nil {
+		return fmt.Errorf("create schema %s: %w", schema, err)
 	}
-	if _, err := conn.Exec(ctx, "SET search_path TO "+pgxQuoteIdent(testSchema)); err != nil {
+	if _, err := conn.Exec(ctx, "SET search_path TO "+pgxQuoteIdent(schema)); err != nil {
 		return fmt.Errorf("set search_path: %w", err)
 	}
-	for _, f := range []string{"testdata/contract/0001_init.sql", "testdata/seed.sql"} {
+	for _, f := range files {
 		body, err := os.ReadFile(f)
 		if err != nil {
 			return fmt.Errorf("read %s: %w", f, err)
@@ -94,11 +114,26 @@ func setupFixture(ctx context.Context, dsn string) error {
 		// No args → pgx uses the simple protocol, which runs the whole
 		// multi-statement script in one round trip.
 		if _, err := conn.Exec(ctx, string(body)); err != nil {
-			return fmt.Errorf("exec %s: %w", f, err)
+			return fmt.Errorf("exec %s into %s: %w", f, schema, err)
 		}
 	}
 	return nil
 }
+
+// pinNow freezes the adapter clock to ts for the duration of a test so
+// period-relative queries (market windows, close-date cutoffs) are deterministic
+// regardless of wall-clock time.
+func pinNow(t *testing.T, ts time.Time) {
+	t.Helper()
+	prev := now
+	now = func() time.Time { return ts }
+	t.Cleanup(func() { now = prev })
+}
+
+// marketClock is the instant the market fixture is tuned around (see
+// seed_market.sql): a 90-day default window then splits the RVT-C* closings from
+// the RVT-P* prior-window closings.
+var marketClock = time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
 
 // expectedOrder is the full keyset ordering (modification_timestamp DESC,
 // listing_key DESC) of the seed. MRD1007/MRD1001 share a timestamp, so their
@@ -629,4 +664,255 @@ func equalStrings(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+func approxEqual(a, b, eps float64) bool {
+	d := a - b
+	if d < 0 {
+		d = -d
+	}
+	return d <= eps
+}
+
+// ----------------------------------------------------------------------------
+// B-M4 — market_stats + get_open_houses (run against testMarketAdapter).
+// ----------------------------------------------------------------------------
+
+func TestMarketStats(t *testing.T) {
+	pinNow(t, marketClock)
+	ctx := context.Background()
+
+	m, err := testMarketAdapter.MarketStats(ctx, mls.StatsQuery{
+		Area:          mls.Area{City: "Rivertown"},
+		PropertyTypes: []string{"Residential"},
+	})
+	if err != nil {
+		t.Fatalf("MarketStats: %v", err)
+	}
+
+	// Closed-sale metrics over the 5 current-window RVT-C* rows.
+	checks := []struct {
+		name string
+		got  int64
+		want int64
+	}{
+		{"PeriodDays", int64(m.PeriodDays), 90},
+		{"MedianClosePrice", m.MedianClosePrice, 500000},
+		{"AvgClosePrice", m.AvgClosePrice, 500000},
+		{"MedianPPSF", m.MedianPPSF, 200},
+		{"MedianDaysOnMarket", int64(m.MedianDaysOnMarket), 40},
+		{"MedianCumulativeDaysOnMarket", int64(m.MedianCumulativeDaysOnMarket), 45},
+		{"ClosedInPeriod", m.ClosedInPeriod, 5},
+		{"MedianListPrice", m.MedianListPrice, 500000},
+		{"ActiveInventory", m.ActiveInventory, 4},
+	}
+	for _, c := range checks {
+		if c.got != c.want {
+			t.Errorf("%s = %d, want %d", c.name, c.got, c.want)
+		}
+	}
+	if !approxEqual(m.MonthsOfSupply, 2.4, 0.001) {
+		t.Errorf("MonthsOfSupply = %v, want ~2.4", m.MonthsOfSupply)
+	}
+	if !approxEqual(m.SaleToListRatio, 0.9783, 0.0005) {
+		t.Errorf("SaleToListRatio = %v, want ~0.9783", m.SaleToListRatio)
+	}
+	if !approxEqual(m.SaleToOriginalRatio, 0.9574, 0.0005) {
+		t.Errorf("SaleToOriginalRatio = %v, want ~0.9574", m.SaleToOriginalRatio)
+	}
+	if m.Prior != nil {
+		t.Errorf("Prior = %+v, want nil without compare_to_prior", m.Prior)
+	}
+	if m.DataAsOf.IsZero() {
+		t.Error("DataAsOf is zero, want the newest property timestamp")
+	}
+}
+
+func TestMarketStatsCompareToPrior(t *testing.T) {
+	pinNow(t, marketClock)
+	ctx := context.Background()
+
+	m, err := testMarketAdapter.MarketStats(ctx, mls.StatsQuery{
+		Area:           mls.Area{City: "Rivertown"},
+		PropertyTypes:  []string{"Residential"},
+		CompareToPrior: true,
+	})
+	if err != nil {
+		t.Fatalf("MarketStats: %v", err)
+	}
+	if m.Prior == nil {
+		t.Fatal("Prior = nil, want the preceding window")
+	}
+	p := m.Prior
+	// The 3 prior-window RVT-P* rows: closes 380/420/460k, DOM 25/35/45.
+	if p.ClosedInPeriod != 3 {
+		t.Errorf("Prior.ClosedInPeriod = %d, want 3", p.ClosedInPeriod)
+	}
+	if p.MedianClosePrice != 420000 || p.AvgClosePrice != 420000 {
+		t.Errorf("Prior median/avg close = %d/%d, want 420000/420000", p.MedianClosePrice, p.AvgClosePrice)
+	}
+	if p.MedianPPSF != 200 {
+		t.Errorf("Prior.MedianPPSF = %d, want 200", p.MedianPPSF)
+	}
+	if p.MedianDaysOnMarket != 35 {
+		t.Errorf("Prior.MedianDaysOnMarket = %d, want 35", p.MedianDaysOnMarket)
+	}
+	// Current window is unchanged by asking for the comparison.
+	if m.MedianClosePrice != 500000 || m.ClosedInPeriod != 5 {
+		t.Errorf("current window changed: median=%d closed=%d", m.MedianClosePrice, m.ClosedInPeriod)
+	}
+	// Inventory is a current snapshot and is not reconstructed for the past.
+	if p.ActiveInventory != 0 || p.MonthsOfSupply != 0 || p.MedianListPrice != 0 {
+		t.Errorf("Prior carried inventory metrics: %+v", p)
+	}
+}
+
+func TestMarketStatsNoMatches(t *testing.T) {
+	pinNow(t, marketClock)
+	ctx := context.Background()
+
+	// A property type with no rows → all-zero, no error, no divide-by-zero.
+	m, err := testMarketAdapter.MarketStats(ctx, mls.StatsQuery{
+		Area:          mls.Area{City: "Rivertown"},
+		PropertyTypes: []string{"Commercial"},
+	})
+	if err != nil {
+		t.Fatalf("MarketStats: %v", err)
+	}
+	if m.ClosedInPeriod != 0 || m.ActiveInventory != 0 || m.MedianClosePrice != 0 || m.MonthsOfSupply != 0 {
+		t.Errorf("expected all-zero stats, got %+v", m)
+	}
+}
+
+func TestOpenHouses(t *testing.T) {
+	ctx := context.Background()
+	res, err := testMarketAdapter.OpenHouses(ctx, mls.OpenHouseQuery{
+		Area: mls.Area{City: "Rivertown"},
+		From: time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC),
+		To:   time.Date(2026, 7, 31, 0, 0, 0, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatalf("OpenHouses: %v", err)
+	}
+	// OH-A1-1 (07-04), OH-A2-1 (07-05), OH-A1-2 (07-11); the Elsewhere OH is
+	// filtered out by the area predicate.
+	gotKeys := make([]string, len(res.OpenHouses))
+	for i, oh := range res.OpenHouses {
+		gotKeys[i] = oh.ListingKey
+	}
+	if !equalStrings(gotKeys, []string{"RVT-A1", "RVT-A2", "RVT-A1"}) {
+		t.Fatalf("open-house order = %v, want [RVT-A1 RVT-A2 RVT-A1]", gotKeys)
+	}
+	first := res.OpenHouses[0]
+	if !first.Date.Equal(time.Date(2026, 7, 4, 0, 0, 0, 0, time.UTC)) {
+		t.Errorf("first date = %v, want 2026-07-04", first.Date)
+	}
+	if first.Address.City != "Rivertown" {
+		t.Errorf("first address city = %q, want Rivertown (joined from property)", first.Address.City)
+	}
+	if first.StartTime.IsZero() || first.EndTime.IsZero() {
+		t.Errorf("first open house missing start/end: %+v", first)
+	}
+	if res.DataAsOf.IsZero() {
+		t.Error("DataAsOf is zero, want newest open-house sync time")
+	}
+}
+
+func TestOpenHousesWindowAndEmpty(t *testing.T) {
+	ctx := context.Background()
+
+	// A single-day window catches only the 07-05 open house.
+	res, err := testMarketAdapter.OpenHouses(ctx, mls.OpenHouseQuery{
+		Area: mls.Area{City: "Rivertown"},
+		From: time.Date(2026, 7, 5, 0, 0, 0, 0, time.UTC),
+		To:   time.Date(2026, 7, 6, 0, 0, 0, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatalf("OpenHouses window: %v", err)
+	}
+	if len(res.OpenHouses) != 1 || res.OpenHouses[0].ListingKey != "RVT-A2" {
+		t.Errorf("windowed open houses = %+v, want just RVT-A2", res.OpenHouses)
+	}
+
+	// An area with no open houses → empty, non-error.
+	res, err = testMarketAdapter.OpenHouses(ctx, mls.OpenHouseQuery{
+		Area: mls.Area{City: "Nowhere"},
+		From: time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC),
+		To:   time.Date(2026, 7, 31, 0, 0, 0, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatalf("OpenHouses empty: %v", err)
+	}
+	if len(res.OpenHouses) != 0 {
+		t.Errorf("expected no open houses, got %d", len(res.OpenHouses))
+	}
+}
+
+// TestEndToEndMarketToolsOverMCP proves the full pipe for the B-M4 tools: MCP
+// client → tool → real adapter → seeded market database.
+func TestEndToEndMarketToolsOverMCP(t *testing.T) {
+	pinNow(t, marketClock)
+	ctx := context.Background()
+	cs := mcpClient(t, testMarketAdapter)
+
+	// market_stats over the Rivertown fixture.
+	res, err := cs.CallTool(ctx, &mcp.CallToolParams{
+		Name:      "market_stats",
+		Arguments: map[string]any{"city": "Rivertown", "property_types": []string{"Residential"}},
+	})
+	if err != nil {
+		t.Fatalf("market_stats CallTool: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("market_stats tool error: %+v", res.Content)
+	}
+	var stats struct {
+		MedianClosePrice int64 `json:"median_close_price"`
+		ActiveInventory  int64 `json:"active_inventory"`
+		ClosedInPeriod   int64 `json:"closed_in_period"`
+	}
+	decodeStructured(t, res.StructuredContent, &stats)
+	if stats.MedianClosePrice != 500000 || stats.ActiveInventory != 4 || stats.ClosedInPeriod != 5 {
+		t.Errorf("stats = %+v, want 500000/4/5", stats)
+	}
+
+	// get_open_houses over the same fixture.
+	res, err = cs.CallTool(ctx, &mcp.CallToolParams{
+		Name:      "get_open_houses",
+		Arguments: map[string]any{"city": "Rivertown", "from": "2026-07-01", "to": "2026-07-31"},
+	})
+	if err != nil {
+		t.Fatalf("get_open_houses CallTool: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("get_open_houses tool error: %+v", res.Content)
+	}
+	var oh struct {
+		Count int `json:"count"`
+	}
+	decodeStructured(t, res.StructuredContent, &oh)
+	if oh.Count != 3 {
+		t.Errorf("open-house count = %d, want 3 (Elsewhere excluded)", oh.Count)
+	}
+}
+
+// mcpClient wires an in-memory MCP client to a server backed by src.
+func mcpClient(t *testing.T, src mls.Source) *mcp.ClientSession {
+	t.Helper()
+	ctx := context.Background()
+	srv, err := server.New(src, server.WithInfo("mlsgrid-mcp-it", "test"))
+	if err != nil {
+		t.Fatalf("server.New: %v", err)
+	}
+	clientT, serverT := mcp.NewInMemoryTransports()
+	if _, err := srv.Connect(ctx, serverT, nil); err != nil {
+		t.Fatalf("server.Connect: %v", err)
+	}
+	client := mcp.NewClient(&mcp.Implementation{Name: "it-client", Version: "test"}, nil)
+	cs, err := client.Connect(ctx, clientT, nil)
+	if err != nil {
+		t.Fatalf("client.Connect: %v", err)
+	}
+	t.Cleanup(func() { _ = cs.Close() })
+	return cs
 }

@@ -583,6 +583,289 @@
     }
   },
   {
+    "name": "get_open_houses",
+    "description": "List scheduled open houses for an area and date range.\n\nOptionally scope by area (city / postal_code / county / state) and bound with from / to dates (YYYY-MM-DD or RFC3339). Defaults to the next 7 days from today. Results are ordered by date, then start time; limit defaults to 25 (capped at 100). Each entry carries the listing_key (use it with get_listing for full detail), the address, the date and start/end times, and any public remarks.\n\nUse it to plan a showing route (agents/buyers) or to see which comparable listings are actively being marketed this week. The schedule is only as current as the last sync — data_as_of tells you when that was, and an open house synced days ago may since have been cancelled.",
+    "input_schema": {
+      "additionalProperties": false,
+      "properties": {
+        "city": {
+          "description": "area: city (case-insensitive exact match)",
+          "type": "string"
+        },
+        "county": {
+          "description": "area: county or parish",
+          "type": "string"
+        },
+        "from": {
+          "description": "start of the date window, YYYY-MM-DD or RFC3339 (default today)",
+          "type": "string"
+        },
+        "limit": {
+          "description": "maximum open houses to return (default 25, capped at 100)",
+          "type": "integer"
+        },
+        "postal_code": {
+          "description": "area: postal code",
+          "type": "string"
+        },
+        "state": {
+          "description": "area: two-letter state or province",
+          "type": "string"
+        },
+        "to": {
+          "description": "end of the date window, inclusive, YYYY-MM-DD or RFC3339 (default from + 7 days)",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "output_schema": {
+      "additionalProperties": false,
+      "properties": {
+        "count": {
+          "description": "number of open houses returned",
+          "type": "integer"
+        },
+        "data_as_of": {
+          "description": "how current the open-house schedule is (RFC3339 UTC)",
+          "type": "string"
+        },
+        "open_houses": {
+          "description": "scheduled open houses, earliest first",
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "address": {
+                "additionalProperties": false,
+                "description": "listing address (from the joined property record)",
+                "properties": {
+                  "city": {
+                    "description": "city",
+                    "type": "string"
+                  },
+                  "county": {
+                    "description": "county or parish",
+                    "type": "string"
+                  },
+                  "postal_code": {
+                    "description": "postal code",
+                    "type": "string"
+                  },
+                  "state": {
+                    "description": "two-letter state or province",
+                    "type": "string"
+                  },
+                  "street_name": {
+                    "description": "street name including directional prefix/suffix as delivered",
+                    "type": "string"
+                  },
+                  "street_number": {
+                    "description": "street number as delivered",
+                    "type": "string"
+                  },
+                  "unit_number": {
+                    "description": "unit or apartment number, if any",
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              },
+              "date": {
+                "description": "open-house date, YYYY-MM-DD",
+                "type": "string"
+              },
+              "end_time": {
+                "description": "end time (RFC3339 UTC)",
+                "type": "string"
+              },
+              "listing_key": {
+                "description": "MLS Grid key of the listing; use with get_listing",
+                "type": "string"
+              },
+              "mls_number": {
+                "description": "human-facing MLS number of the listing",
+                "type": "string"
+              },
+              "remarks": {
+                "description": "public open-house remarks",
+                "type": "string"
+              },
+              "start_time": {
+                "description": "start time (RFC3339 UTC)",
+                "type": "string"
+              }
+            },
+            "required": [
+              "address",
+              "date"
+            ],
+            "type": "object"
+          },
+          "type": [
+            "null",
+            "array"
+          ]
+        }
+      },
+      "required": [
+        "open_houses",
+        "count"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "market_stats",
+    "description": "Aggregate an area's market over a trailing window: pricing, pace, and supply.\n\nRequires an area (city / postal_code / county / state — it will not aggregate the whole feed). Optionally narrow by property_types and set period_days (default 90). Money is in whole US dollars.\n\nReturns two groups of numbers. Current for-sale snapshot: median_list_price, active_inventory, and months_of_supply (active inventory ÷ the monthly closed-sale rate — under ~6 favors sellers, over ~6 favors buyers). Sales closed in the period: median/avg close price, median_ppsf, median days on market (both median_days_on_market and median_cumulative_days_on_market, which counts relists and exposes DOM-reset gaming), and sale-to-list reported two ways — sale_to_list_ratio (vs the final list price) and sale_to_original_ratio (vs the original ask, showing total markdown). Set compare_to_prior to also get the immediately preceding window as prior (closed-sale metrics only; inventory is a current snapshot and is not reconstructed for the past).\n\nPersonas: agents gauge market temperature for a pricing conversation; investors read months_of_supply and sale-to-list for timing and negotiation room; buyers/sellers learn whether it is a buyer's or seller's market. Honest limit: these are medians over whatever closed in the window, so a thin area or short period yields small samples — widen period_days when counts are low.",
+    "input_schema": {
+      "additionalProperties": false,
+      "properties": {
+        "city": {
+          "description": "area: city (required unless another area field is set); case-insensitive exact match",
+          "type": "string"
+        },
+        "compare_to_prior": {
+          "description": "also aggregate the immediately preceding window and return it as prior",
+          "type": "boolean"
+        },
+        "county": {
+          "description": "area: county or parish",
+          "type": "string"
+        },
+        "period_days": {
+          "description": "trailing window in days for closed-sale metrics (default 90)",
+          "type": "integer"
+        },
+        "postal_code": {
+          "description": "area: postal code",
+          "type": "string"
+        },
+        "property_types": {
+          "description": "limit to these PropertyType or PropertySubType values; empty means all types",
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "null",
+            "array"
+          ]
+        },
+        "state": {
+          "description": "area: two-letter state or province",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "output_schema": {
+      "additionalProperties": false,
+      "properties": {
+        "active_inventory": {
+          "description": "count of active listings in the area/type right now",
+          "type": "integer"
+        },
+        "avg_close_price": {
+          "description": "average close price of sales in the period, whole US dollars",
+          "type": "integer"
+        },
+        "closed_in_period": {
+          "description": "number of sales that closed in the period",
+          "type": "integer"
+        },
+        "data_as_of": {
+          "description": "how current the underlying data is (RFC3339 UTC)",
+          "type": "string"
+        },
+        "median_close_price": {
+          "description": "median close price of sales in the period, whole US dollars",
+          "type": "integer"
+        },
+        "median_cumulative_days_on_market": {
+          "description": "median cumulative days on market (across relists); a gap vs median_days_on_market suggests DOM resets",
+          "type": "integer"
+        },
+        "median_days_on_market": {
+          "description": "median days on market of closed sales",
+          "type": "integer"
+        },
+        "median_list_price": {
+          "description": "median list price of active inventory, whole US dollars",
+          "type": "integer"
+        },
+        "median_ppsf": {
+          "description": "median close price per square foot, whole US dollars",
+          "type": "integer"
+        },
+        "months_of_supply": {
+          "description": "active inventory ÷ monthly closed-sale rate; under ~6 favors sellers",
+          "type": "number"
+        },
+        "period_days": {
+          "description": "trailing window aggregated over, in days",
+          "type": "integer"
+        },
+        "prior": {
+          "additionalProperties": false,
+          "description": "the immediately preceding window when compare_to_prior is set",
+          "properties": {
+            "avg_close_price": {
+              "description": "average close price in whole US dollars",
+              "type": "integer"
+            },
+            "closed_in_period": {
+              "description": "number of sales closed in this prior window",
+              "type": "integer"
+            },
+            "median_close_price": {
+              "description": "median close price in whole US dollars",
+              "type": "integer"
+            },
+            "median_cumulative_days_on_market": {
+              "description": "median cumulative days on market (across relists)",
+              "type": "integer"
+            },
+            "median_days_on_market": {
+              "description": "median days on market of closed sales",
+              "type": "integer"
+            },
+            "median_ppsf": {
+              "description": "median close price per square foot in whole US dollars",
+              "type": "integer"
+            },
+            "period_days": {
+              "description": "length of this prior window in days",
+              "type": "integer"
+            },
+            "sale_to_list_ratio": {
+              "description": "median close ÷ final list price",
+              "type": "number"
+            },
+            "sale_to_original_ratio": {
+              "description": "median close ÷ original list price",
+              "type": "number"
+            }
+          },
+          "type": [
+            "null",
+            "object"
+          ]
+        },
+        "sale_to_list_ratio": {
+          "description": "median close ÷ final list price (negotiation off the last ask)",
+          "type": "number"
+        },
+        "sale_to_original_ratio": {
+          "description": "median close ÷ original list price (total markdown from first ask)",
+          "type": "number"
+        }
+      },
+      "required": [
+        "period_days"
+      ],
+      "type": "object"
+    }
+  },
+  {
     "name": "price_history",
     "description": "Return a listing's observed price and status change timeline.\n\nIdentify the listing the same way as get_listing: by listing_key (preferred) or by mls_number (add originating_system if the number exists in more than one feed). Returns each captured event (new listing, price change, status change, back on market, delisted) with its old/new value and when it was observed, plus total_reduction_pct (net list-price change as a percent of the first observed price; positive means the price came down) and days_since_last_change.\n\nImportant: history is best-effort from first sync forward — there is no event for a change that happened before this database began tracking the listing, so an empty or short timeline does not mean the listing never changed. Use it to spot motivated sellers (repeated cuts, long time since last change) and to explain a price's trajectory.",
     "input_schema": {

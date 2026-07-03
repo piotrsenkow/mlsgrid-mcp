@@ -136,5 +136,7 @@ func majorVersion(v string) (int, error) {
 	return strconv.Atoi(v)
 }
 
-// now returns the current time in UTC. Wrapped so tests can reason about it.
-func now() time.Time { return time.Now().UTC() }
+// now returns the current time in UTC. It is a package var (not a plain func)
+// so tests can pin it to a fixed instant and assert time-relative queries
+// (period windows, close-date cutoffs) deterministically.
+var now = func() time.Time { return time.Now().UTC() }
