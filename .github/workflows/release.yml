@@ -17,6 +17,8 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
+      # Never cut a release on a drifted schema pin or failing unit tests.
+      - run: ./scripts/verify-contract-pin.sh
       - run: go test -race ./...
       - uses: goreleaser/goreleaser-action@v6
         with:

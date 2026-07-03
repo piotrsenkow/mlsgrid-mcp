@@ -34,10 +34,16 @@ this server reads is owned by [mlsgrid-sync](https://github.com/piotrsenkow/mlsg
   guard → read-only transaction (search_path pinned) → statement timeout → row
   cap → least-privilege role, and the server refuses to expose the tool over a
   superuser connection.
-- [ ] **M6 — v0.1.0 release.** `docs/tools.md` + `docs/adapters.md` polish,
-  Claude Desktop / Claude Code config snippets, cross-repo CI (apply
-  mlsgrid-sync migrations at a pinned tag), goreleaser + tag-triggered release,
-  badges. Submit to the MCP registry / awesome-mcp — the first OSS MLS Grid MCP
+- [x] **M6 — v0.1.0 release.** Docs polished (`docs/tools.md`, `docs/adapters.md`,
+  README with Claude Desktop / Claude Code snippets + `query_sql` role setup),
+  badges. Live cross-repo drift check (`contract-drift` CI job / `make verify-pin`):
+  re-derives the vendored migration's blob sha1 and diffs it against mlsgrid-sync
+  at the pinned commit, so a moved tag or hand-edited vendor fails the build; also
+  gates the release. goreleaser + tag-triggered `release.yml` (binaries, archives,
+  checksums, github-native changelog). `server.json` MCP-registry manifest drafted
+  (oci package → `ghcr.io/piotrsenkow/mlsgrid-mcp`, stdio). Remaining outward steps
+  are operator-run: cut the `v0.1.0` tag, publish the OCI image, `mcp-publisher`
+  to the registry, and the awesome-mcp-servers PR — the first OSS MLS Grid MCP
   server.
 
 ## Post-1.0 candidates (demand-driven)

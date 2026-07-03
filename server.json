@@ -1,0 +1,36 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.piotrsenkow/mlsgrid-mcp",
+  "description": "MCP server for RESO / MLS Grid real-estate data over a mlsgrid-sync PostgreSQL database",
+  "version": "0.1.0",
+  "repository": {
+    "url": "https://github.com/piotrsenkow/mlsgrid-mcp",
+    "source": "github"
+  },
+  "websiteUrl": "https://github.com/piotrsenkow/mlsgrid-mcp",
+  "packages": [
+    {
+      "registryType": "oci",
+      "registryBaseUrl": "https://ghcr.io",
+      "identifier": "ghcr.io/piotrsenkow/mlsgrid-mcp",
+      "version": "0.1.0",
+      "transport": { "type": "stdio" },
+      "environmentVariables": [
+        {
+          "name": "MLSGRID_MCP_DATABASE_URL",
+          "description": "PostgreSQL DSN for the mlsgrid-sync database; point it at a read-only role",
+          "isRequired": true,
+          "isSecret": true,
+          "format": "string"
+        },
+        {
+          "name": "MLSGRID_MCP_DATABASE_SCHEMA",
+          "description": "Schema holding the mlsgrid-sync tables",
+          "isRequired": false,
+          "default": "mlsgrid",
+          "format": "string"
+        }
+      ]
+    }
+  ]
+}
