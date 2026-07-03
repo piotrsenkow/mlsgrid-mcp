@@ -234,20 +234,30 @@ type StatsQuery struct {
 	CompareToPrior bool
 }
 
-// MarketStats is an aggregate market snapshot.
+// MarketStats is an aggregate market snapshot. Inventory-based metrics
+// (MedianListPrice, ActiveInventory, MonthsOfSupply) describe the current
+// for-sale snapshot; the rest describe sales closed within the period. When
+// attached as a Prior snapshot only the closed-sale metrics are populated —
+// inventory is a point-in-time figure that cannot be reconstructed for a past
+// window.
 type MarketStats struct {
-	Area               Area
-	MedianListPrice    int64
-	MedianClosePrice   int64
-	AvgClosePrice      int64
-	MedianPPSF         int64
-	MedianDaysOnMarket int
-	SaleToListRatio    float64
-	ActiveInventory    int64
-	ClosedInPeriod     int64
-	MonthsOfSupply     float64
-	Prior              *MarketStats // populated when CompareToPrior is set
-	DataAsOf           time.Time
+	Area       Area
+	PeriodDays int // the trailing window actually aggregated over, after defaults
+	// Inventory snapshot (current for-sale).
+	MedianListPrice int64
+	ActiveInventory int64
+	MonthsOfSupply  float64
+	// Closed sales within the period.
+	MedianClosePrice             int64
+	AvgClosePrice                int64
+	MedianPPSF                   int64
+	MedianDaysOnMarket           int
+	MedianCumulativeDaysOnMarket int     // median across relists; catches DOM-reset gaming
+	SaleToListRatio              float64 // median(close / final list price)
+	SaleToOriginalRatio          float64 // median(close / original list price)
+	ClosedInPeriod               int64
+	Prior                        *MarketStats // populated when CompareToPrior is set
+	DataAsOf                     time.Time
 }
 
 // ----------------------------------------------------------------------------
@@ -294,4 +304,12 @@ type OpenHouse struct {
 	StartTime  time.Time
 	EndTime    time.Time
 	Remarks    string
+}
+
+// OpenHouseResult wraps a page of open houses with a data-as-of stamp, so the
+// tool can report how current the schedule is (an open house synced days ago
+// may have been cancelled).
+type OpenHouseResult struct {
+	OpenHouses []OpenHouse
+	DataAsOf   time.Time
 }

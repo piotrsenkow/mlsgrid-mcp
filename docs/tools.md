@@ -178,10 +178,77 @@ range widens.
 }
 ```
 
+### `market_stats`
+
+Aggregates an area's market over a trailing window. Requires an area (`city` /
+`postal_code` / `county` / `state` — it will not aggregate the whole feed);
+optionally narrow by `property_types` and set `period_days` (default ~90). Money
+is in whole dollars.
+
+Returns a current for-sale snapshot — `median_list_price`, `active_inventory`,
+and `months_of_supply` (active inventory ÷ the monthly closed-sale rate; under ~6
+favors sellers, over ~6 favors buyers) — plus metrics over sales that closed in
+the period: median/avg close price, `median_ppsf`, `median_days_on_market` and
+`median_cumulative_days_on_market` (a gap between the two flags relist / DOM-reset
+gaming), and sale-to-list two ways — `sale_to_list_ratio` (vs the final list
+price) and `sale_to_original_ratio` (vs the original ask). Set `compare_to_prior`
+to also get the immediately preceding window as `prior` (closed-sale metrics
+only; inventory is a current snapshot and is not reconstructed for the past).
+
+These are medians over whatever closed in the window, so a thin area or short
+period yields small samples — widen `period_days` when counts are low.
+
+```json
+// request
+{ "city": "Evanston", "property_types": ["Residential"], "period_days": 90, "compare_to_prior": true }
+// response (abridged)
+{
+  "period_days": 90,
+  "median_list_price": 615000, "active_inventory": 48, "months_of_supply": 2.4,
+  "median_close_price": 500000, "avg_close_price": 500000, "median_ppsf": 200,
+  "median_days_on_market": 40, "median_cumulative_days_on_market": 45,
+  "sale_to_list_ratio": 0.9783, "sale_to_original_ratio": 0.9574,
+  "closed_in_period": 60,
+  "prior": {
+    "period_days": 90, "median_close_price": 485000, "closed_in_period": 71,
+    "median_days_on_market": 33, "sale_to_list_ratio": 0.99
+  },
+  "data_as_of": "2026-06-30T09:00:00Z"
+}
+```
+
+### `get_open_houses`
+
+Lists scheduled open houses for an area and date range. Optionally scope by area
+(`city` / `postal_code` / `county` / `state`) and bound with `from` / `to`
+(`YYYY-MM-DD` or RFC3339); defaults to the next 7 days from today. Ordered by
+date then start time; `limit` defaults to 25 (capped at 100). Each entry carries
+the `listing_key` (use it with `get_listing`), the address, date, start/end
+times, and any remarks. The schedule is only as current as the last sync —
+`data_as_of` says when that was, and an open house synced days ago may since have
+been cancelled.
+
+```json
+// request
+{ "city": "Evanston", "from": "2026-07-04", "to": "2026-07-05" }
+// response (abridged)
+{
+  "count": 2,
+  "data_as_of": "2026-07-01T09:00:00Z",
+  "open_houses": [
+    {
+      "listing_key": "MRD1010", "mls_number": "1010",
+      "address": { "street_name": "Sheridan Rd", "city": "Evanston", "state": "IL" },
+      "date": "2026-07-04", "start_time": "2026-07-04T16:00:00Z", "end_time": "2026-07-04T18:00:00Z",
+      "remarks": "Twilight open house"
+    }
+    // … 1 more
+  ]
+}
+```
+
 ## Planned
 
 | Tool | Milestone | Purpose |
 |---|---|---|
-| `market_stats` | B-M4 | Median/avg price, $/sqft, DOM, sale-to-list, inventory, months-of-supply |
-| `get_open_houses` | B-M4 | Scheduled open houses for an area and date range |
 | `query_sql` | B-M5 | Opt-in read-only SQL escape hatch (off by default; DB-role + guard enforced) |

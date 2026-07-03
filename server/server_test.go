@@ -31,6 +31,12 @@ type fakeSource struct {
 	comps       *mls.CompsResult
 	compsErr    error
 	lastComps   mls.CompsQuery
+	stats       *mls.MarketStats
+	statsErr    error
+	lastStats   mls.StatsQuery
+	openHouses  mls.OpenHouseResult
+	ohErr       error
+	lastOH      mls.OpenHouseQuery
 	closed      bool
 }
 
@@ -53,15 +59,17 @@ func (f *fakeSource) FindComparables(_ context.Context, q mls.CompsQuery) (*mls.
 	f.lastComps = q
 	return f.comps, f.compsErr
 }
-func (f *fakeSource) MarketStats(context.Context, mls.StatsQuery) (*mls.MarketStats, error) {
-	return nil, mls.ErrNotImplemented
+func (f *fakeSource) MarketStats(_ context.Context, q mls.StatsQuery) (*mls.MarketStats, error) {
+	f.lastStats = q
+	return f.stats, f.statsErr
 }
 func (f *fakeSource) PriceHistory(_ context.Context, ref mls.ListingRef) (*mls.PriceHistory, error) {
 	f.lastHistRef = ref
 	return f.history, f.histErr
 }
-func (f *fakeSource) OpenHouses(context.Context, mls.OpenHouseQuery) ([]mls.OpenHouse, error) {
-	return nil, mls.ErrNotImplemented
+func (f *fakeSource) OpenHouses(_ context.Context, q mls.OpenHouseQuery) (mls.OpenHouseResult, error) {
+	f.lastOH = q
+	return f.openHouses, f.ohErr
 }
 func (f *fakeSource) Close() error { f.closed = true; return nil }
 
@@ -132,6 +140,8 @@ func TestListToolsExposesRegisteredTools(t *testing.T) {
 		"get_listing":        false,
 		"price_history":      false,
 		"get_comps":          false,
+		"market_stats":       false,
+		"get_open_houses":    false,
 	}
 	for _, tool := range res.Tools {
 		if _, ok := want[tool.Name]; !ok {
@@ -523,6 +533,154 @@ func TestCallGetListingRequiresRef(t *testing.T) {
 	}
 	if !res.IsError {
 		t.Error("expected IsError result when neither listing_key nor mls_number is given")
+	}
+}
+
+func TestCallMarketStats(t *testing.T) {
+	src := &fakeSource{
+		stats: &mls.MarketStats{
+			PeriodDays:                   90,
+			MedianListPrice:              500000,
+			ActiveInventory:              4,
+			MonthsOfSupply:               2.4,
+			MedianClosePrice:             500000,
+			AvgClosePrice:                500000,
+			MedianPPSF:                   200,
+			MedianDaysOnMarket:           40,
+			MedianCumulativeDaysOnMarket: 45,
+			SaleToListRatio:              0.9783,
+			SaleToOriginalRatio:          0.9574,
+			ClosedInPeriod:               5,
+			Prior: &mls.MarketStats{
+				PeriodDays:       90,
+				MedianClosePrice: 420000,
+				ClosedInPeriod:   3,
+			},
+			DataAsOf: time.Date(2026, 6, 30, 9, 0, 0, 0, time.UTC),
+		},
+	}
+	cs := connect(t, src)
+
+	res, err := cs.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "market_stats",
+		Arguments: map[string]any{
+			"city": "Rivertown", "property_types": []string{"Residential"},
+			"period_days": 90, "compare_to_prior": true,
+		},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("tool reported error: %+v", res.Content)
+	}
+	// Arguments decoded into the source query.
+	if src.lastStats.Area.City != "Rivertown" || len(src.lastStats.PropertyTypes) != 1 ||
+		!src.lastStats.CompareToPrior || src.lastStats.Period != 90*24*time.Hour {
+		t.Errorf("decoded stats query = %+v", src.lastStats)
+	}
+
+	var got marketStatsOut
+	remarshal(t, res.StructuredContent, &got)
+	if got.MedianClosePrice != 500000 || got.ActiveInventory != 4 || got.ClosedInPeriod != 5 {
+		t.Errorf("stats = %+v", got)
+	}
+	if got.MonthsOfSupply != 2.4 || got.SaleToListRatio != 0.9783 || got.SaleToOriginalRatio != 0.9574 {
+		t.Errorf("derived metrics = %+v", got)
+	}
+	if got.MedianCumulativeDaysOnMarket != 45 {
+		t.Errorf("median_cumulative_days_on_market = %d, want 45", got.MedianCumulativeDaysOnMarket)
+	}
+	if got.Prior == nil || got.Prior.MedianClosePrice != 420000 || got.Prior.ClosedInPeriod != 3 {
+		t.Errorf("prior = %+v", got.Prior)
+	}
+	if got.DataAsOf != "2026-06-30T09:00:00Z" {
+		t.Errorf("data_as_of = %q", got.DataAsOf)
+	}
+}
+
+func TestCallMarketStatsRequiresArea(t *testing.T) {
+	// No area → the tool rejects it before touching the source (a whole-feed
+	// aggregate is never implied).
+	cs := connect(t, &fakeSource{stats: &mls.MarketStats{}})
+	res, err := cs.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "market_stats",
+		Arguments: map[string]any{"period_days": 30},
+	})
+	if err != nil {
+		return
+	}
+	if !res.IsError {
+		t.Error("expected IsError result when no area is given")
+	}
+}
+
+func TestCallGetOpenHouses(t *testing.T) {
+	src := &fakeSource{
+		openHouses: mls.OpenHouseResult{
+			OpenHouses: []mls.OpenHouse{
+				{
+					ListingKey: "RVT-A1", MLSNumber: "A1",
+					Address:   mls.Address{StreetName: "Main St", City: "Rivertown", State: "IL"},
+					Date:      time.Date(2026, 7, 4, 0, 0, 0, 0, time.UTC),
+					StartTime: time.Date(2026, 7, 4, 16, 0, 0, 0, time.UTC),
+					EndTime:   time.Date(2026, 7, 4, 18, 0, 0, 0, time.UTC),
+					Remarks:   "Weekend open house",
+				},
+			},
+			DataAsOf: time.Date(2026, 7, 1, 9, 0, 0, 0, time.UTC),
+		},
+	}
+	cs := connect(t, src)
+
+	res, err := cs.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "get_open_houses",
+		Arguments: map[string]any{
+			"city": "Rivertown", "from": "2026-07-01", "to": "2026-07-31", "limit": 10,
+		},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("tool reported error: %+v", res.Content)
+	}
+	// Arguments decoded, including the parsed date window.
+	if src.lastOH.Area.City != "Rivertown" || src.lastOH.Limit != 10 ||
+		!src.lastOH.From.Equal(time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)) ||
+		!src.lastOH.To.Equal(time.Date(2026, 7, 31, 0, 0, 0, 0, time.UTC)) {
+		t.Errorf("decoded open-house query = %+v", src.lastOH)
+	}
+
+	var got openHousesOutput
+	remarshal(t, res.StructuredContent, &got)
+	if got.Count != 1 || len(got.OpenHouses) != 1 {
+		t.Fatalf("count = %d open_houses = %d, want 1/1", got.Count, len(got.OpenHouses))
+	}
+	oh := got.OpenHouses[0]
+	if oh.ListingKey != "RVT-A1" || oh.Address.City != "Rivertown" {
+		t.Errorf("open house = %+v", oh)
+	}
+	if oh.Date != "2026-07-04" || oh.StartTime != "2026-07-04T16:00:00Z" {
+		t.Errorf("date/start = %q/%q", oh.Date, oh.StartTime)
+	}
+	if got.DataAsOf != "2026-07-01T09:00:00Z" {
+		t.Errorf("data_as_of = %q", got.DataAsOf)
+	}
+}
+
+func TestCallGetOpenHousesBadDate(t *testing.T) {
+	// An unparseable date is rejected before the source is called.
+	cs := connect(t, &fakeSource{openHouses: mls.OpenHouseResult{}})
+	res, err := cs.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "get_open_houses",
+		Arguments: map[string]any{"from": "next tuesday"},
+	})
+	if err != nil {
+		return
+	}
+	if !res.IsError {
+		t.Error("expected IsError result for an invalid date")
 	}
 }
 

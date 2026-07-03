@@ -81,8 +81,9 @@ type Source interface {
 	// first sync forward; see Capabilities.HistorySince.
 	PriceHistory(ctx context.Context, ref ListingRef) (*PriceHistory, error)
 
-	// OpenHouses returns scheduled open houses for an area and date range.
-	OpenHouses(ctx context.Context, q OpenHouseQuery) ([]OpenHouse, error)
+	// OpenHouses returns scheduled open houses for an area and date range,
+	// wrapped with a data-as-of stamp.
+	OpenHouses(ctx context.Context, q OpenHouseQuery) (OpenHouseResult, error)
 
 	// Close releases resources held by the source (connection pools, etc.).
 	Close() error

@@ -21,9 +21,12 @@ this server reads is owned by [mlsgrid-sync](https://github.com/piotrsenkow/mlsg
 - [x] **M3 — Valuation.** `get_comps` (bbox prefilter + haversine + weighted
   similarity, no PostGIS so it stays portable) and `price_history` (listing_event
   timeline + total reduction + days-since-last-change).
-- [ ] **M4 — Market + events.** `market_stats` (median/avg price, $/sqft, DOM,
-  sale-to-list, inventory, months-of-supply; period comparisons) and
-  `get_open_houses` (area + date range).
+- [x] **M4 — Market + events.** `market_stats` (median/avg price, $/sqft, DOM
+  and cumulative DOM, sale-to-list and sale-to-original, inventory,
+  months-of-supply; period comparisons via `compare_to_prior`) and
+  `get_open_houses` (area + date range). Medians computed server-side with
+  `percentile_cont`; a separate `mlsgrid_market` fixture schema keeps the
+  aggregate assertions off the main seed's exact counts.
 - [ ] **M5 — SQL escape hatch.** Opt-in `query_sql` behind `internal/sqlguard`
   (single read-only statement, deny-list, auto-LIMIT, statement timeout) plus a
   provisioned read-only DB role documented in the quickstart; injection-corpus
