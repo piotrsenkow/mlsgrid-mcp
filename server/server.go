@@ -19,6 +19,7 @@ const DefaultName = "mlsgrid-mcp"
 type options struct {
 	name    string
 	version string
+	sql     bool
 }
 
 // Option configures the server.
@@ -36,14 +37,23 @@ func WithInfo(name, version string) Option {
 	}
 }
 
+// WithSQL enables the opt-in query_sql escape hatch. It only takes effect when
+// the source also implements mls.SQLQuerier; otherwise it is a no-op. The
+// caller is responsible for the operational preconditions (a least-privilege
+// read-only role) — this switch is off by default.
+func WithSQL(enabled bool) Option {
+	return func(o *options) { o.sql = enabled }
+}
+
 // New builds an MCP server backed by source and registers the curated tools it
 // can serve. The returned *mcp.Server is ready to Run over a transport; the
 // caller owns both the server and the source's lifetime.
 //
 // Tools are registered milestone by milestone: get_data_freshness (B-M1),
-// search_listings and get_listing (B-M2), price_history + get_comps (B-M3), and
-// market_stats + get_open_houses (B-M4). New does not take ownership of source
-// and never closes it.
+// search_listings and get_listing (B-M2), price_history + get_comps (B-M3),
+// market_stats + get_open_houses (B-M4), and the opt-in query_sql escape hatch
+// (B-M5, off unless WithSQL is set and the source supports it). New does not
+// take ownership of source and never closes it.
 func New(source mls.Source, opts ...Option) (*mcp.Server, error) {
 	if source == nil {
 		return nil, errors.New("server: source must not be nil")
@@ -61,5 +71,10 @@ func New(source mls.Source, opts ...Option) (*mcp.Server, error) {
 	registerComps(srv, source)
 	registerStats(srv, source)
 	registerOpenHouses(srv, source)
+	if o.sql {
+		if q, ok := source.(mls.SQLQuerier); ok {
+			registerQuerySQL(srv, q)
+		}
+	}
 	return srv, nil
 }

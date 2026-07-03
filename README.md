@@ -9,11 +9,12 @@ agents query real-estate (RESO / MLS Grid) data — search listings, pull comps,
 read market stats — over a database you populate with its companion project,
 [`mlsgrid-sync`](https://github.com/piotrsenkow/mlsgrid-sync).
 
-> **Status: early (v0, pre-release).** The architecture is in place — the public
+> **Status: pre-release (v0).** The architecture is in place — the public
 > `mls.Source` seam, a stdio server on the official Go SDK, and the Postgres
-> adapter — and the first tool, `get_data_freshness`, works end to end. The
-> query tools (`search_listings`, `get_comps`, `market_stats`, …) are landing
-> milestone by milestone; see the [roadmap](docs/ROADMAP.md).
+> adapter — and the full curated tool set works end to end: freshness, search,
+> listing detail, comps, price history, market stats, and open houses, plus an
+> opt-in read-only SQL escape hatch. What remains before v0.1.0 is release
+> polish; see the [roadmap](docs/ROADMAP.md).
 
 ## How it fits together
 
@@ -88,6 +89,44 @@ Add to your `claude_desktop_config.json`:
 For production, point the URL at a **read-only** database role — see
 [docs/adapters.md](docs/adapters.md).
 
+### `query_sql` (opt-in SQL escape hatch)
+
+Beyond the curated tools, `mlsgrid-mcp` can expose a single tool, `query_sql`,
+that runs a caller-supplied read-only `SELECT`. It is **off by default** and
+meant for one-off questions the curated tools don't cover. Because it hands an
+agent raw SQL, it is gated on three things at once:
+
+1. **You enable it** — `MLSGRID_MCP_SQL_ENABLED=true` (or `sql.enabled: true`).
+2. **A least-privilege role** — the server **refuses to expose it over a
+   superuser connection**, and every query runs in a read-only transaction under
+   a statement timeout (`MLSGRID_MCP_SQL_TIMEOUT`, default `5s`) with a row cap
+   (`MLSGRID_MCP_SQL_MAX_ROWS`, default `1000`).
+3. **A lexical guard** — input that isn't a lone `SELECT`/`WITH`, or that
+   contains writes, DDL, multiple statements, or server-side file/IO functions,
+   is rejected before it reaches the database.
+
+Provision a dedicated read-only role and point the server at it (adjust the
+schema if you changed it from the default `mlsgrid`):
+
+```sql
+CREATE ROLE mlsgrid_ro LOGIN PASSWORD '…';           -- not a superuser
+GRANT CONNECT ON DATABASE mls TO mlsgrid_ro;
+GRANT USAGE ON SCHEMA mlsgrid TO mlsgrid_ro;
+GRANT SELECT ON ALL TABLES IN SCHEMA mlsgrid TO mlsgrid_ro;
+-- so future mlsgrid-sync tables are readable too:
+ALTER DEFAULT PRIVILEGES IN SCHEMA mlsgrid GRANT SELECT ON TABLES TO mlsgrid_ro;
+```
+
+```sh
+export MLSGRID_MCP_DATABASE_URL=postgres://mlsgrid_ro:…@host:5432/mls
+export MLSGRID_MCP_SQL_ENABLED=true
+mlsgrid-mcp check   # the features line shows sql=true when it will be exposed
+```
+
+`check` prints why the tool is withheld if the connection is a superuser or the
+source can't back it. Leave `MLSGRID_MCP_SQL_ENABLED` unset to keep only the
+curated tools.
+
 ## Tools
 
 Structured JSON out, whole-dollar money, a data-as-of timestamp on every
@@ -96,13 +135,13 @@ response. Full catalog in [docs/tools.md](docs/tools.md).
 | Tool | Status | Purpose |
 |---|---|---|
 | `get_data_freshness` | **live** | Sync cursors, listing counts by status, media coverage, contract version — trust + liveness check |
-| `search_listings` | planned | Area + status/type/price/beds/baths/sqft/year/DOM/keyword filters |
-| `get_listing` | planned | Full detail by ListingKey or MLS number |
-| `get_comps` | planned | Comparable sales: distance + similarity + suggested range |
-| `price_history` | planned | Observed price/status timeline and total reduction |
-| `market_stats` | planned | Median/avg price, $/sqft, DOM, sale-to-list, inventory, months-of-supply |
-| `get_open_houses` | planned | Scheduled open houses by area and date range |
-| `query_sql` | planned | Opt-in, read-only SQL escape hatch (off by default) |
+| `search_listings` | **live** | Area + status/type/price/beds/baths/sqft/year/DOM/keyword filters |
+| `get_listing` | **live** | Full detail by ListingKey or MLS number |
+| `get_comps` | **live** | Comparable sales: distance + similarity + suggested range |
+| `price_history` | **live** | Observed price/status timeline and total reduction |
+| `market_stats` | **live** | Median/avg price, $/sqft, DOM, sale-to-list, inventory, months-of-supply |
+| `get_open_houses` | **live** | Scheduled open houses by area and date range |
+| `query_sql` | **live** (opt-in) | Read-only SQL escape hatch — [off by default](#query_sql-opt-in-sql-escape-hatch) |
 
 ## Extending it
 

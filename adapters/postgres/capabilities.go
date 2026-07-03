@@ -14,9 +14,10 @@ import (
 func (a *Adapter) Capabilities(ctx context.Context) (mls.Capabilities, error) {
 	caps := mls.Capabilities{
 		SchemaContractVersion: a.contractVersion,
-		// SQL is off until the query_sql tool ships (B-M5) and is enabled in
-		// server config; the adapter does not implement SQLQuerier yet.
-		SQL: false,
+		// SQL reports that this adapter can back query_sql (it implements
+		// SQLQuerier). Whether the tool is actually exposed is a separate,
+		// operator-controlled decision made in server configuration.
+		SQL: true,
 	}
 
 	systems, err := a.distinctText(ctx, "property", "originating_system_name")

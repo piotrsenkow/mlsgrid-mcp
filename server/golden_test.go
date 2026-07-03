@@ -29,7 +29,8 @@ type goldenTool struct {
 // contract; a diff here means the wire shape changed and the golden must be
 // updated deliberately (go test ./server -run TestToolsListGolden -update).
 func TestToolsListGolden(t *testing.T) {
-	cs := connect(t, &fakeSource{freshness: sampleFreshness()})
+	// SQL enabled so the golden also locks the opt-in query_sql tool's schema.
+	cs := connectSQL(t, &fakeSource{freshness: sampleFreshness()})
 
 	res, err := cs.ListTools(context.Background(), nil)
 	if err != nil {

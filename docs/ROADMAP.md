@@ -27,10 +27,13 @@ this server reads is owned by [mlsgrid-sync](https://github.com/piotrsenkow/mlsg
   `get_open_houses` (area + date range). Medians computed server-side with
   `percentile_cont`; a separate `mlsgrid_market` fixture schema keeps the
   aggregate assertions off the main seed's exact counts.
-- [ ] **M5 — SQL escape hatch.** Opt-in `query_sql` behind `internal/sqlguard`
-  (single read-only statement, deny-list, auto-LIMIT, statement timeout) plus a
-  provisioned read-only DB role documented in the quickstart; injection-corpus
-  tests.
+- [x] **M5 — SQL escape hatch.** Opt-in `query_sql` behind `internal/sqlguard`
+  (single read-only statement, leading-verb allow-list + dangerous-keyword
+  deny-list, auto-LIMIT wrap, statement timeout) plus a provisioned read-only DB
+  role documented in the README; injection-corpus tests. Layered enforcement:
+  guard → read-only transaction (search_path pinned) → statement timeout → row
+  cap → least-privilege role, and the server refuses to expose the tool over a
+  superuser connection.
 - [ ] **M6 — v0.1.0 release.** `docs/tools.md` + `docs/adapters.md` polish,
   Claude Desktop / Claude Code config snippets, cross-repo CI (apply
   mlsgrid-sync migrations at a pinned tag), goreleaser + tag-triggered release,

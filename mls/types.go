@@ -26,8 +26,9 @@ type Capabilities struct {
 	HistorySince time.Time
 	// OpenHouses is true when open-house data is synced.
 	OpenHouses bool
-	// SQL is true when the source also implements SQLQuerier and the server is
-	// configured to expose the query_sql tool.
+	// SQL is true when the source can back the opt-in query_sql tool (it
+	// implements SQLQuerier). Whether that tool is actually exposed to clients
+	// additionally requires the server to be configured to enable it.
 	SQL bool
 	// Statuses lists the distinct StandardStatus values present, so tools can
 	// hint valid filter values.

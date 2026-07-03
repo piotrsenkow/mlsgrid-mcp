@@ -247,8 +247,48 @@ been cancelled.
 }
 ```
 
+### `query_sql` (opt-in, off by default)
+
+An escape hatch for questions the curated tools can't express: run a single
+read-only SQL `SELECT` (or `WITH … SELECT`) against the database. It is **not
+registered unless the operator explicitly enables it** (`sql.enabled` /
+`MLSGRID_MCP_SQL_ENABLED`) over a connection that is **not** a superuser — see
+the [README's query_sql section](../README.md#query_sql-opt-in-sql-escape-hatch)
+for the least-privilege role setup that makes it safe.
+
+Enforcement is layered, defense-in-depth:
+
+- **Guard** (`internal/sqlguard`): rejects anything that isn't a lone
+  `SELECT`/`WITH`, and blocks writes, DDL, multiple statements, and server-side
+  file/IO functions — before the query reaches the database.
+- **Read-only transaction** with `search_path` pinned to the data schema, so
+  unqualified names resolve there and nothing can be written.
+- **Statement timeout** (`sql.timeout`, default 5s) bounds runaway queries.
+- **Row cap** (`max_rows`, default 1000, hard ceiling 10000): results are wrapped
+  in an outer `LIMIT`; `truncated` tells you when more matched.
+- **Least-privilege DB role**: the real backstop. The server refuses to expose
+  the tool over a superuser connection.
+
+To discover names, query `information_schema` (unqualified names resolve to the
+data schema, so `current_schema()` returns it). Numeric columns (prices, areas)
+come back as **strings** to preserve precision; `timestamptz` values render as
+RFC3339 UTC.
+
+```json
+// request
+{ "query": "SELECT county_or_parish AS county, count(*) AS n FROM property WHERE standard_status = 'Active' GROUP BY 1 ORDER BY 2 DESC", "max_rows": 5 }
+// response
+{
+  "columns": ["county", "n"],
+  "rows": [["Cook", "4821"], ["DuPage", "1190"], ["Lake", "742"]],
+  "row_count": 3,
+  "truncated": false,
+  "data_as_of": "2026-07-03T06:18:03Z"
+}
+```
+
 ## Planned
 
-| Tool | Milestone | Purpose |
-|---|---|---|
-| `query_sql` | B-M5 | Opt-in read-only SQL escape hatch (off by default; DB-role + guard enforced) |
+No new tools are planned for v0.1.0 — the curated set above plus the opt-in
+`query_sql` hatch is the 1.0 surface. Post-1.0 candidates (SQLite adapter,
+Member/Office resources, HTTP transport) are tracked in [ROADMAP.md](ROADMAP.md).

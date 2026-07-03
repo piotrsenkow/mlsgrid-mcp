@@ -15,3 +15,14 @@ database:
 server:
   # Name advertised to MCP clients in the handshake.
   name: mlsgrid-mcp
+
+sql:
+  # The opt-in query_sql escape hatch: a single caller-supplied read-only SELECT.
+  # OFF by default. Only enable it over a least-privilege, non-superuser role —
+  # the server refuses to expose it over a superuser connection. See the
+  # "query_sql" section of the README before turning this on.
+  enabled: false
+  # Default rows returned per query (a hard ceiling is enforced regardless).
+  max_rows: 1000
+  # statement_timeout applied to each query (bounds runaway queries).
+  timeout: 5s
