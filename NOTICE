@@ -1,0 +1,14 @@
+mlsgrid-mcp
+Copyright 2026 Piotr Senkow
+
+Developed by Piotr Senkow (https://github.com/piotrsenkow), founder of
+Realytica (https://realytica.com), where the production experience behind
+this tool's design originated.
+
+mlsgrid-mcp reads a database produced by its companion project mlsgrid-sync
+(https://github.com/piotrsenkow/mlsgrid-sync). It ships no MLS data.
+
+This product is not affiliated with or endorsed by MLS Grid LLC. Use of MLS
+Grid data requires your own executed MLS Grid Data License Agreement, and any
+data you expose through this server remains subject to your license's display
+and distribution rules.

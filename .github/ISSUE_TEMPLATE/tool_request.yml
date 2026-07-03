@@ -1,0 +1,33 @@
+name: Tool or adapter request
+description: Suggest a new MCP tool, a field a tool should return, or a new data-source adapter.
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        mlsgrid-mcp exposes a small set of curated tools over the mlsgrid-sync
+        schema. If you want a new query shape — or an adapter for a store other
+        than Postgres — describe the agent task it unlocks.
+  - type: textarea
+    id: task
+    attributes:
+      label: What should an agent be able to do?
+      description: The user-facing question or workflow, e.g. "find rentals under $2k within 2mi of a subject that allow pets".
+    validations:
+      required: true
+  - type: dropdown
+    id: kind
+    attributes:
+      label: Kind
+      options:
+        - New tool
+        - New field on an existing tool
+        - New data-source adapter
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: shape
+    attributes:
+      label: Proposed inputs / outputs
+      description: Rough parameters and result fields, if you have them in mind. Note if it needs data the schema contract doesn't currently expose.

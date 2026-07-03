@@ -1,0 +1,40 @@
+version: 2
+
+project_name: mlsgrid-mcp
+
+builds:
+  - main: ./cmd/mlsgrid-mcp
+    env:
+      - CGO_ENABLED=0
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+    ignore:
+      - goos: windows
+        goarch: arm64
+    ldflags:
+      - -s -w -X github.com/piotrsenkow/mlsgrid-mcp/internal/cli.version={{.Version}}
+
+archives:
+  - formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files:
+      - LICENSE
+      - NOTICE
+      - README.md
+      - config.example.yaml
+      - docs/*
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  use: github-native
+
+release:
+  footer: |
+    ---
+    **Compliance reminder:** mlsgrid-mcp exposes MLS data you have licensed
+    through MLS Grid. Any data served remains subject to your license's display
+    and distribution rules. See the README compliance section.

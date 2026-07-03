@@ -1,0 +1,17 @@
+# mlsgrid-mcp example configuration.
+# Copy to mlsgrid-mcp.yaml (gitignored) and adjust, or skip the file entirely
+# and configure via MLSGRID_MCP_-prefixed environment variables.
+# Every value can be overridden with an env var, e.g. MLSGRID_MCP_DATABASE_URL
+# overrides database.url.
+
+database:
+  # Postgres connection string for the database mlsgrid-sync populates.
+  # Prefer setting this via MLSGRID_MCP_DATABASE_URL — do not commit credentials.
+  # In production, point it at a read-only role (see docs/adapters.md).
+  url: ""
+  # Schema holding the mlsgrid-sync tables (its default is "mlsgrid").
+  schema: mlsgrid
+
+server:
+  # Name advertised to MCP clients in the handshake.
+  name: mlsgrid-mcp
