@@ -7,24 +7,14 @@ import (
 )
 
 // The methods below complete the mls.Source interface but are not implemented
-// yet. They land in later milestones (see docs/ROADMAP.md): get_comps /
-// price_history in B-M3, market_stats / get_open_houses in B-M4. Until then they
-// return mls.ErrNotImplemented so the adapter satisfies the interface and the
-// server can register only the tools it can actually serve. SearchListings and
-// GetListing (B-M2) live in search.go and listing.go.
-
-// FindComparables is not yet implemented (B-M3).
-func (a *Adapter) FindComparables(ctx context.Context, q mls.CompsQuery) (*mls.CompsResult, error) {
-	return nil, mls.ErrNotImplemented
-}
+// yet. They land in B-M4 (see docs/ROADMAP.md): market_stats / get_open_houses.
+// Until then they return mls.ErrNotImplemented so the adapter satisfies the
+// interface and the server registers only the tools it can serve.
+// SearchListings/GetListing (B-M2) live in search.go and listing.go;
+// PriceHistory and FindComparables (B-M3) in history.go and comps.go.
 
 // MarketStats is not yet implemented (B-M4).
 func (a *Adapter) MarketStats(ctx context.Context, q mls.StatsQuery) (*mls.MarketStats, error) {
-	return nil, mls.ErrNotImplemented
-}
-
-// PriceHistory is not yet implemented (B-M3).
-func (a *Adapter) PriceHistory(ctx context.Context, ref mls.ListingRef) (*mls.PriceHistory, error) {
 	return nil, mls.ErrNotImplemented
 }
 

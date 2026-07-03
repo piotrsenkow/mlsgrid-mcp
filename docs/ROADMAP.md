@@ -18,7 +18,7 @@ this server reads is owned by [mlsgrid-sync](https://github.com/piotrsenkow/mlsg
   fixtures built from mlsgrid-sync's migrations at a pinned tag + `seed.sql`
   (this is the cross-repo contract test), `tools/list` golden file, protocol
   `tools/call` tests per tool.
-- [ ] **M3 — Valuation.** `get_comps` (bbox prefilter + haversine + weighted
+- [x] **M3 — Valuation.** `get_comps` (bbox prefilter + haversine + weighted
   similarity, no PostGIS so it stays portable) and `price_history` (listing_event
   timeline + total reduction + days-since-last-change).
 - [ ] **M4 — Market + events.** `market_stats` (median/avg price, $/sqft, DOM,

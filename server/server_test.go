@@ -16,16 +16,22 @@ import (
 // pin the value (or error) each tool returns so the wire path — input decoding,
 // handler, structured output — can be exercised without a database.
 type fakeSource struct {
-	freshness  mls.Freshness
-	freshErr   error
-	search     mls.Page[mls.ListingSummary]
-	searchErr  error
-	lastSearch mls.SearchQuery // captures the decoded query the tool passed in
-	listing    *mls.ListingDetail
-	listErr    error
-	lastRef    mls.ListingRef
-	lastOpts   mls.ListingOptions
-	closed     bool
+	freshness   mls.Freshness
+	freshErr    error
+	search      mls.Page[mls.ListingSummary]
+	searchErr   error
+	lastSearch  mls.SearchQuery // captures the decoded query the tool passed in
+	listing     *mls.ListingDetail
+	listErr     error
+	lastRef     mls.ListingRef
+	lastOpts    mls.ListingOptions
+	history     *mls.PriceHistory
+	histErr     error
+	lastHistRef mls.ListingRef
+	comps       *mls.CompsResult
+	compsErr    error
+	lastComps   mls.CompsQuery
+	closed      bool
 }
 
 func (f *fakeSource) Capabilities(context.Context) (mls.Capabilities, error) {
@@ -43,14 +49,16 @@ func (f *fakeSource) GetListing(_ context.Context, ref mls.ListingRef, opts mls.
 	f.lastOpts = opts
 	return f.listing, f.listErr
 }
-func (f *fakeSource) FindComparables(context.Context, mls.CompsQuery) (*mls.CompsResult, error) {
-	return nil, mls.ErrNotImplemented
+func (f *fakeSource) FindComparables(_ context.Context, q mls.CompsQuery) (*mls.CompsResult, error) {
+	f.lastComps = q
+	return f.comps, f.compsErr
 }
 func (f *fakeSource) MarketStats(context.Context, mls.StatsQuery) (*mls.MarketStats, error) {
 	return nil, mls.ErrNotImplemented
 }
-func (f *fakeSource) PriceHistory(context.Context, mls.ListingRef) (*mls.PriceHistory, error) {
-	return nil, mls.ErrNotImplemented
+func (f *fakeSource) PriceHistory(_ context.Context, ref mls.ListingRef) (*mls.PriceHistory, error) {
+	f.lastHistRef = ref
+	return f.history, f.histErr
 }
 func (f *fakeSource) OpenHouses(context.Context, mls.OpenHouseQuery) ([]mls.OpenHouse, error) {
 	return nil, mls.ErrNotImplemented
@@ -122,6 +130,8 @@ func TestListToolsExposesRegisteredTools(t *testing.T) {
 		"get_data_freshness": false,
 		"search_listings":    false,
 		"get_listing":        false,
+		"price_history":      false,
+		"get_comps":          false,
 	}
 	for _, tool := range res.Tools {
 		if _, ok := want[tool.Name]; !ok {
@@ -330,6 +340,178 @@ func TestCallGetListingMapsSourceErrors(t *testing.T) {
 				t.Errorf("expected IsError result for %s", name)
 			}
 		})
+	}
+}
+
+func TestCallPriceHistory(t *testing.T) {
+	src := &fakeSource{
+		history: &mls.PriceHistory{
+			ListingKey: "MRD1003",
+			Events: []mls.PriceEvent{
+				{EventType: "price_change", OldValue: "520000", NewValue: "500000", ObservedAt: time.Date(2026, 5, 10, 9, 0, 0, 0, time.UTC)},
+				{EventType: "status_change", OldValue: "Active", NewValue: "Closed", ObservedAt: time.Date(2026, 5, 20, 9, 0, 0, 0, time.UTC)},
+			},
+			TotalReductionPct:   3.846,
+			DaysSinceLastChange: 44,
+			DataAsOf:            time.Date(2026, 5, 20, 9, 0, 0, 0, time.UTC),
+		},
+	}
+	cs := connect(t, src)
+
+	res, err := cs.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "price_history",
+		Arguments: map[string]any{"listing_key": "MRD1003"},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("tool reported error: %+v", res.Content)
+	}
+	if src.lastHistRef.Key != "MRD1003" {
+		t.Errorf("decoded ref = %+v", src.lastHistRef)
+	}
+
+	var got historyOutput
+	remarshal(t, res.StructuredContent, &got)
+	if got.ListingKey != "MRD1003" || len(got.Events) != 2 {
+		t.Fatalf("history = %+v", got)
+	}
+	if got.Events[0].EventType != "price_change" || got.Events[0].NewValue != "500000" {
+		t.Errorf("event[0] = %+v", got.Events[0])
+	}
+	if got.Events[0].ObservedAt != "2026-05-10T09:00:00Z" {
+		t.Errorf("event[0] observed_at = %q", got.Events[0].ObservedAt)
+	}
+	if got.DaysSinceLastChange != 44 {
+		t.Errorf("days_since_last_change = %d, want 44", got.DaysSinceLastChange)
+	}
+}
+
+func TestCallPriceHistoryMapsErrors(t *testing.T) {
+	cases := map[string]error{"not found": mls.ErrNotFound, "ambiguous": mls.ErrAmbiguousRef}
+	for name, srcErr := range cases {
+		t.Run(name, func(t *testing.T) {
+			cs := connect(t, &fakeSource{histErr: srcErr})
+			res, err := cs.CallTool(context.Background(), &mcp.CallToolParams{
+				Name:      "price_history",
+				Arguments: map[string]any{"mls_number": "9999"},
+			})
+			if err != nil {
+				return
+			}
+			if !res.IsError {
+				t.Errorf("expected IsError result for %s", name)
+			}
+		})
+	}
+}
+
+func TestCallGetComps(t *testing.T) {
+	dist := 0.8
+	src := &fakeSource{
+		comps: &mls.CompsResult{
+			Comparables: []mls.Comparable{
+				{
+					ListingSummary: mls.ListingSummary{ListingKey: "MRD1003", ClosePrice: 485000, LivingArea: 2600},
+					DistanceMiles:  &dist,
+					Similarity:     0.92,
+					AdjustNotes:    []string{"100 sqft smaller", "same beds"},
+				},
+			},
+			MedianClosePrice: 485000,
+			MedianPPSF:       187,
+			SuggestedLow:     470000,
+			SuggestedHigh:    510000,
+			DataAsOf:         time.Date(2026, 6, 12, 9, 0, 0, 0, time.UTC),
+		},
+	}
+	cs := connect(t, src)
+
+	res, err := cs.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "get_comps",
+		Arguments: map[string]any{
+			"listing_key": "MRD1010", "radius_miles": 5, "closed_within_days": 365, "limit": 3,
+		},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("tool reported error: %+v", res.Content)
+	}
+	// Arguments decoded into the source query (subject ref + tuning).
+	if src.lastComps.Subject.Key != "MRD1010" || src.lastComps.RadiusMiles != 5 ||
+		src.lastComps.Limit != 3 || src.lastComps.ClosedWithin != 365*24*time.Hour {
+		t.Errorf("decoded comps query = %+v", src.lastComps)
+	}
+
+	var got compsOutput
+	remarshal(t, res.StructuredContent, &got)
+	if got.Count != 1 || len(got.Comparables) != 1 {
+		t.Fatalf("count = %d comparables = %d, want 1/1", got.Count, len(got.Comparables))
+	}
+	if got.MedianClosePrice != 485000 || got.SuggestedLow != 470000 || got.SuggestedHigh != 510000 {
+		t.Errorf("valuation = %+v", got)
+	}
+	c := got.Comparables[0]
+	if c.ListingKey != "MRD1003" || c.Similarity != 0.92 {
+		t.Errorf("comp = %+v", c)
+	}
+	if c.DistanceMiles == nil || *c.DistanceMiles != 0.8 {
+		t.Errorf("distance = %v, want 0.8", c.DistanceMiles)
+	}
+	if len(c.AdjustNotes) != 2 {
+		t.Errorf("adjust_notes = %v", c.AdjustNotes)
+	}
+}
+
+func TestCallGetCompsSpecScope(t *testing.T) {
+	// An inline spec that carries an area is accepted and forwarded as Spec.
+	src := &fakeSource{comps: &mls.CompsResult{}}
+	cs := connect(t, src)
+	res, err := cs.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "get_comps",
+		Arguments: map[string]any{"city": "Evanston", "property_type": "Residential", "living_area": 2700},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("unexpected error: %+v", res.Content)
+	}
+	if src.lastComps.Spec == nil || src.lastComps.Spec.Area.City != "Evanston" || src.lastComps.Spec.LivingArea != 2700 {
+		t.Errorf("spec not forwarded: %+v", src.lastComps.Spec)
+	}
+}
+
+func TestCallGetCompsRequiresScope(t *testing.T) {
+	// Neither a subject ref nor a geographic scope → the tool rejects it before
+	// touching the source (a whole-market scan is never implied).
+	cs := connect(t, &fakeSource{comps: &mls.CompsResult{}})
+	res, err := cs.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "get_comps",
+		Arguments: map[string]any{"living_area": 2000},
+	})
+	if err != nil {
+		return
+	}
+	if !res.IsError {
+		t.Error("expected IsError result when no subject or area/coords is given")
+	}
+}
+
+func TestCallGetCompsMapsSubjectNotFound(t *testing.T) {
+	cs := connect(t, &fakeSource{compsErr: mls.ErrNotFound})
+	res, err := cs.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "get_comps",
+		Arguments: map[string]any{"listing_key": "NOPE"},
+	})
+	if err != nil {
+		return
+	}
+	if !res.IsError {
+		t.Error("expected IsError result when the subject is not found")
 	}
 }
 

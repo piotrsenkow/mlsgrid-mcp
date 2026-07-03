@@ -109,12 +109,79 @@ Example (abridged):
 }
 ```
 
+### `price_history`
+
+Returns a listing's observed price/status change timeline from mlsgrid-sync's
+append-only change capture — new listing, price change, status change, back on
+market, delisted — with `total_reduction_pct` (net list-price change as a percent
+of the first observed price; positive means the price came down) and
+`days_since_last_change`. Identify the listing the same way as `get_listing`.
+
+**Best-effort from first sync forward:** there is no event for a change that
+predates this database's tracking of the listing, so a short or empty timeline
+does not mean the listing never changed. Good for spotting motivated sellers
+(repeated cuts, long time since last change).
+
+```json
+// request
+{ "listing_key": "MRD1003" }
+// response
+{
+  "listing_key": "MRD1003",
+  "total_reduction_pct": 3.85,
+  "days_since_last_change": 44,
+  "data_as_of": "2026-05-20T09:00:00Z",
+  "events": [
+    { "event_type": "price_change", "old_value": "520000", "new_value": "500000", "observed_at": "2026-05-10T09:00:00Z" },
+    { "event_type": "status_change", "old_value": "Active", "new_value": "Closed", "observed_at": "2026-05-20T09:00:00Z" }
+  ]
+}
+```
+
+### `get_comps`
+
+Finds comparable recent CLOSED sales for a subject and summarizes a suggested
+value range. Identify the subject by reference (`listing_key`, or `mls_number`
+[+ `originating_system`]) or inline: an area (`city` / `postal_code` / `county` —
+required unless you pass `latitude`+`longitude`) plus what you know
+(`property_type`, `living_area`, `bedrooms`, `bathrooms_full`, `year_built`).
+
+Comps are same-product-type closings in the subject's area within the lookback
+window (`closed_within_days`, default ~180). When the subject has coordinates the
+pool is limited to `radius_miles` (default ~1) and distance feeds the score;
+**most feeds, including MRED, omit coordinates**, so comps then fall back to the
+same city/area and `distance_miles` is omitted. Each comp has a 0..1 `similarity`
+(a heuristic over size, beds/baths, age, and distance when available — living
+area ~40%, beds/baths ~35%, age ~15%, distance ~10%, renormalized over whatever
+the subject specifies) plus `adjust_notes`. The suggested range is the
+interquartile $/sqft × the subject's size, or interquartile close price when size
+is unknown. It is decision support, not an appraisal — with few nearby sales the
+range widens.
+
+```json
+// request (inline spec, no coordinates → area fallback, distance omitted)
+{ "city": "Evanston", "property_type": "Residential", "living_area": 2700, "bedrooms": 4 }
+// response (comparables abridged)
+{
+  "count": 2,
+  "median_close_price": 542500, "median_ppsf": 197,
+  "suggested_low": 517410, "suggested_high": 544887,
+  "data_as_of": "2026-06-12T09:00:00Z",
+  "comparables": [
+    {
+      "listing_key": "MRD1010", "standard_status": "Closed", "close_price": 600000,
+      "living_area": 2900, "similarity": 0.94,
+      "adjust_notes": ["200 sqft larger", "same beds", "6 yrs newer"]
+    }
+    // … 1 more
+  ]
+}
+```
+
 ## Planned
 
 | Tool | Milestone | Purpose |
 |---|---|---|
-| `get_comps` | B-M3 | Comparable sales for a subject: distance + weighted similarity + suggested range |
-| `price_history` | B-M3 | Observed change timeline (price/status), total reduction, days since last change |
 | `market_stats` | B-M4 | Median/avg price, $/sqft, DOM, sale-to-list, inventory, months-of-supply |
 | `get_open_houses` | B-M4 | Scheduled open houses for an area and date range |
 | `query_sql` | B-M5 | Opt-in read-only SQL escape hatch (off by default; DB-role + guard enforced) |

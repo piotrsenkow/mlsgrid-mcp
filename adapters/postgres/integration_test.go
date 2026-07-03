@@ -376,6 +376,175 @@ func TestContractMajorMismatch(t *testing.T) {
 	}
 }
 
+func TestPriceHistory(t *testing.T) {
+	ctx := context.Background()
+
+	// MRD1003 has a price_change (520000→500000) then a status_change.
+	h, err := testAdapter.PriceHistory(ctx, mls.ListingRef{Key: "MRD1003"})
+	if err != nil {
+		t.Fatalf("PriceHistory: %v", err)
+	}
+	if h.ListingKey != "MRD1003" {
+		t.Errorf("ListingKey = %q", h.ListingKey)
+	}
+	if len(h.Events) != 2 {
+		t.Fatalf("events = %d, want 2 (%+v)", len(h.Events), h.Events)
+	}
+	if h.Events[0].EventType != "price_change" || h.Events[0].OldValue != "520000" || h.Events[0].NewValue != "500000" {
+		t.Errorf("event[0] = %+v", h.Events[0])
+	}
+	if h.Events[1].EventType != "status_change" {
+		t.Errorf("event[1] = %+v", h.Events[1])
+	}
+	if h.Events[0].ObservedAt.After(h.Events[1].ObservedAt) {
+		t.Error("events not ordered oldest-first")
+	}
+	if got := h.TotalReductionPct; got < 3.8 || got > 3.9 {
+		t.Errorf("TotalReductionPct = %v, want ~3.85", got)
+	}
+	if h.DaysSinceLastChange <= 0 {
+		t.Errorf("DaysSinceLastChange = %d, want > 0", h.DaysSinceLastChange)
+	}
+	want := time.Date(2026, 5, 20, 9, 0, 0, 0, time.UTC)
+	if !h.DataAsOf.Equal(want) {
+		t.Errorf("DataAsOf = %v, want %v", h.DataAsOf, want)
+	}
+}
+
+func TestPriceHistoryEmptyTimeline(t *testing.T) {
+	// MRD1001 has no listing_event rows: a valid listing with no captured history.
+	h, err := testAdapter.PriceHistory(context.Background(), mls.ListingRef{Key: "MRD1001"})
+	if err != nil {
+		t.Fatalf("PriceHistory: %v", err)
+	}
+	if len(h.Events) != 0 {
+		t.Errorf("events = %d, want 0", len(h.Events))
+	}
+	if h.TotalReductionPct != 0 || h.DaysSinceLastChange != 0 {
+		t.Errorf("reduction=%v days=%d, want 0/0", h.TotalReductionPct, h.DaysSinceLastChange)
+	}
+}
+
+func TestPriceHistoryRefErrors(t *testing.T) {
+	ctx := context.Background()
+	if _, err := testAdapter.PriceHistory(ctx, mls.ListingRef{Key: "NOPE"}); !errors.Is(err, mls.ErrNotFound) {
+		t.Errorf("missing key err = %v, want ErrNotFound", err)
+	}
+	if _, err := testAdapter.PriceHistory(ctx, mls.ListingRef{MLSNumber: "9999"}); !errors.Is(err, mls.ErrAmbiguousRef) {
+		t.Errorf("ambiguous err = %v, want ErrAmbiguousRef", err)
+	}
+	if _, err := testAdapter.PriceHistory(ctx, mls.ListingRef{}); !errors.Is(err, mls.ErrNotFound) {
+		t.Errorf("empty ref err = %v, want ErrNotFound", err)
+	}
+}
+
+func TestCompsGeoSubject(t *testing.T) {
+	// MRD1010 (Evanston SFR, coords present) → its comp is MRD1003, the other
+	// closed Evanston single-family; distance is computed because both have
+	// coordinates. A wide radius keeps the ~0.86mi neighbor in the pool.
+	res, err := testAdapter.FindComparables(context.Background(), mls.CompsQuery{
+		Subject:     mls.ListingRef{Key: "MRD1010"},
+		RadiusMiles: 5,
+	})
+	if err != nil {
+		t.Fatalf("FindComparables: %v", err)
+	}
+	if len(res.Comparables) != 1 {
+		t.Fatalf("comps = %d, want 1 (%+v)", len(res.Comparables), compKeys(res.Comparables))
+	}
+	c := res.Comparables[0]
+	if c.ListingKey != "MRD1003" {
+		t.Errorf("comp = %s, want MRD1003", c.ListingKey)
+	}
+	if c.DistanceMiles == nil {
+		t.Error("DistanceMiles = nil, want a value (both have coordinates)")
+	} else if *c.DistanceMiles <= 0 || *c.DistanceMiles > 5 {
+		t.Errorf("DistanceMiles = %v, want within radius", *c.DistanceMiles)
+	}
+	if c.Similarity <= 0 || c.Similarity > 1 {
+		t.Errorf("Similarity = %v, want (0,1]", c.Similarity)
+	}
+	if res.MedianClosePrice != 485000 {
+		t.Errorf("MedianClosePrice = %d, want 485000", res.MedianClosePrice)
+	}
+	if res.MedianPPSF != 187 { // 485000/2600 ≈ 186.5
+		t.Errorf("MedianPPSF = %d, want 187", res.MedianPPSF)
+	}
+}
+
+func TestCompsSpecAreaFallback(t *testing.T) {
+	// An inline spec with no coordinates falls back to area (city) scope; both
+	// closed Evanston single-family sales qualify, and distance is omitted.
+	res, err := testAdapter.FindComparables(context.Background(), mls.CompsQuery{
+		Spec: &mls.CompSpec{
+			Area:          mls.Area{City: "Evanston"},
+			PropertyType:  "Residential",
+			LivingArea:    2700,
+			Bedrooms:      4,
+			BathroomsFull: 3,
+			YearBuilt:     1995,
+		},
+	})
+	if err != nil {
+		t.Fatalf("FindComparables: %v", err)
+	}
+	if len(res.Comparables) != 2 {
+		t.Fatalf("comps = %d, want 2 (%v)", len(res.Comparables), compKeys(res.Comparables))
+	}
+	for _, c := range res.Comparables {
+		if c.DistanceMiles != nil {
+			t.Errorf("%s DistanceMiles = %v, want nil (subject has no coordinates)", c.ListingKey, *c.DistanceMiles)
+		}
+	}
+	// Sorted most-similar-first.
+	if res.Comparables[0].Similarity < res.Comparables[1].Similarity {
+		t.Error("comps not sorted by descending similarity")
+	}
+	if res.MedianClosePrice != 542500 { // median(485000, 600000)
+		t.Errorf("MedianClosePrice = %d, want 542500", res.MedianClosePrice)
+	}
+	if res.MedianPPSF != 197 { // median(186.5, 206.9) ≈ 196.7
+		t.Errorf("MedianPPSF = %d, want 197", res.MedianPPSF)
+	}
+	if res.SuggestedLow <= 0 || res.SuggestedHigh <= res.SuggestedLow {
+		t.Errorf("suggested range = [%d, %d], want low<high>0", res.SuggestedLow, res.SuggestedHigh)
+	}
+}
+
+func TestCompsNoMatches(t *testing.T) {
+	// Naperville has no closed sales in the seed → an empty, non-error result.
+	res, err := testAdapter.FindComparables(context.Background(), mls.CompsQuery{
+		Spec: &mls.CompSpec{Area: mls.Area{City: "Naperville"}, PropertyType: "Residential"},
+	})
+	if err != nil {
+		t.Fatalf("FindComparables: %v", err)
+	}
+	if len(res.Comparables) != 0 || res.MedianClosePrice != 0 {
+		t.Errorf("expected empty result, got %d comps / median %d", len(res.Comparables), res.MedianClosePrice)
+	}
+}
+
+func TestCompsSubjectErrors(t *testing.T) {
+	ctx := context.Background()
+	if _, err := testAdapter.FindComparables(ctx, mls.CompsQuery{Subject: mls.ListingRef{Key: "NOPE"}}); !errors.Is(err, mls.ErrNotFound) {
+		t.Errorf("missing subject err = %v, want ErrNotFound", err)
+	}
+	if _, err := testAdapter.FindComparables(ctx, mls.CompsQuery{Subject: mls.ListingRef{MLSNumber: "9999"}}); !errors.Is(err, mls.ErrAmbiguousRef) {
+		t.Errorf("ambiguous subject err = %v, want ErrAmbiguousRef", err)
+	}
+	if _, err := testAdapter.FindComparables(ctx, mls.CompsQuery{}); err == nil {
+		t.Error("expected error when neither subject nor spec is given")
+	}
+}
+
+func compKeys(comps []mls.Comparable) []string {
+	out := make([]string, len(comps))
+	for i, c := range comps {
+		out[i] = c.ListingKey
+	}
+	return out
+}
+
 // TestEndToEndOverMCP proves the full pipe for the B-M2 tools: MCP client →
 // tool → real adapter → seeded database, over the SDK's in-memory transport.
 func TestEndToEndOverMCP(t *testing.T) {
