@@ -105,3 +105,10 @@ INSERT INTO sync_state (resource, originating_system, last_modification_ts, back
 INSERT INTO listing_event (listing_key, event_type, old_value, new_value, observed_at, source_modification_timestamp) VALUES
 ('MRD1003', 'price_change', '520000', '500000', '2026-05-10T09:00:00Z', '2026-05-10T09:00:00Z'),
 ('MRD1003', 'status_change', 'Active', 'Closed', '2026-05-20T09:00:00Z', '2026-05-20T09:00:00Z');
+
+-- Closed listings carry a close_date (the bulk insert above leaves it NULL);
+-- get_comps filters on recent sales, so the comp pool needs it. MRD1003 and
+-- MRD1010 are both Evanston single-family closings → each other's comps.
+UPDATE property SET close_date = '2026-05-18' WHERE listing_key = 'MRD1003';
+UPDATE property SET close_date = '2026-05-30' WHERE listing_key = 'MRD1007';
+UPDATE property SET close_date = '2026-05-22' WHERE listing_key = 'MRD1010';

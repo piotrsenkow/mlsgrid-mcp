@@ -1,5 +1,269 @@
 [
   {
+    "name": "get_comps",
+    "description": "Find comparable recent sales for a property and summarize a suggested value range.\n\nGive a subject either by reference (listing_key, or mls_number [+ originating_system]) or inline: an area (city / postal_code / county — required unless you pass latitude+longitude) plus whatever you know (property_type, living_area, bedrooms, bathrooms_full, year_built).\n\nComps are recent CLOSED sales of the same product type in the subject's area (default: last ~180 days). When the subject has coordinates the pool is limited to a radius and distance feeds the score; most feeds (including MRED) omit coordinates, so comps then fall back to the same city/area and distance is omitted. Each comp carries a 0..1 similarity score (a heuristic over size, beds/baths, age, and distance when available) with short adjust_notes explaining it. The result includes median_close_price, median_ppsf, and a suggested_low/suggested_high range (interquartile $/sqft × the subject's size, or interquartile close price when size is unknown).\n\nUse it for a quick CMA (agents), resale/ARV sanity checks (investors), or to justify an offer (buyers). It is decision support, not an appraisal: with few nearby sales the range widens and confidence drops.",
+    "input_schema": {
+      "additionalProperties": false,
+      "properties": {
+        "bathrooms_full": {
+          "description": "inline subject full bathrooms",
+          "type": "integer"
+        },
+        "bedrooms": {
+          "description": "inline subject bedrooms",
+          "type": "integer"
+        },
+        "city": {
+          "description": "inline subject area: city (required unless coordinates or another area field is given)",
+          "type": "string"
+        },
+        "closed_within_days": {
+          "description": "only consider sales closed within this many days (default ~180)",
+          "type": "integer"
+        },
+        "county": {
+          "description": "inline subject area: county or parish",
+          "type": "string"
+        },
+        "latitude": {
+          "description": "inline subject latitude; enables radius + distance scoring",
+          "type": [
+            "null",
+            "number"
+          ]
+        },
+        "limit": {
+          "description": "maximum comps to return (default 5, capped at 25)",
+          "type": "integer"
+        },
+        "listing_key": {
+          "description": "subject by MLS Grid key (preferred)",
+          "type": "string"
+        },
+        "living_area": {
+          "description": "inline subject living area in square feet (drives the suggested range)",
+          "type": "integer"
+        },
+        "longitude": {
+          "description": "inline subject longitude",
+          "type": [
+            "null",
+            "number"
+          ]
+        },
+        "mls_number": {
+          "description": "subject by MLS number; add originating_system if it exists in more than one feed",
+          "type": "string"
+        },
+        "originating_system": {
+          "description": "originating system slug to disambiguate mls_number",
+          "type": "string"
+        },
+        "postal_code": {
+          "description": "inline subject area: postal code",
+          "type": "string"
+        },
+        "property_type": {
+          "description": "inline subject product type, e.g. Residential",
+          "type": "string"
+        },
+        "radius_miles": {
+          "description": "search radius in miles when the subject has coordinates (default ~1)",
+          "type": "number"
+        },
+        "state": {
+          "description": "inline subject area: two-letter state",
+          "type": "string"
+        },
+        "year_built": {
+          "description": "inline subject year built",
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "output_schema": {
+      "additionalProperties": false,
+      "properties": {
+        "comparables": {
+          "description": "comparable sales, most similar first",
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "address": {
+                "additionalProperties": false,
+                "description": "decomposed street address and locality",
+                "properties": {
+                  "city": {
+                    "description": "city",
+                    "type": "string"
+                  },
+                  "county": {
+                    "description": "county or parish",
+                    "type": "string"
+                  },
+                  "postal_code": {
+                    "description": "postal code",
+                    "type": "string"
+                  },
+                  "state": {
+                    "description": "two-letter state or province",
+                    "type": "string"
+                  },
+                  "street_name": {
+                    "description": "street name including directional prefix/suffix as delivered",
+                    "type": "string"
+                  },
+                  "street_number": {
+                    "description": "street number as delivered",
+                    "type": "string"
+                  },
+                  "unit_number": {
+                    "description": "unit or apartment number, if any",
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              },
+              "adjust_notes": {
+                "description": "human-readable rationale for the score (size/bed/age/distance deltas)",
+                "items": {
+                  "type": "string"
+                },
+                "type": [
+                  "null",
+                  "array"
+                ]
+              },
+              "bathrooms_full": {
+                "description": "full bathrooms",
+                "type": "integer"
+              },
+              "bathrooms_half": {
+                "description": "half bathrooms",
+                "type": "integer"
+              },
+              "bedrooms": {
+                "description": "total bedrooms",
+                "type": "integer"
+              },
+              "close_price": {
+                "description": "sale price in whole US dollars; present only for closed listings",
+                "type": "integer"
+              },
+              "days_on_market": {
+                "description": "days on market",
+                "type": "integer"
+              },
+              "distance_miles": {
+                "description": "miles from the subject; omitted when coordinates are unavailable",
+                "type": [
+                  "null",
+                  "number"
+                ]
+              },
+              "latitude": {
+                "description": "latitude; often absent — many MLSs (incl. MRED) omit coordinates",
+                "type": [
+                  "null",
+                  "number"
+                ]
+              },
+              "list_price": {
+                "description": "list price in whole US dollars",
+                "type": "integer"
+              },
+              "listing_key": {
+                "description": "MLS Grid cross-MLS unique key, e.g. MRD12345678; use it with get_listing",
+                "type": "string"
+              },
+              "living_area": {
+                "description": "living area in square feet",
+                "type": "integer"
+              },
+              "longitude": {
+                "description": "longitude; often absent",
+                "type": [
+                  "null",
+                  "number"
+                ]
+              },
+              "mls_number": {
+                "description": "human-facing MLS number (ListingId); unique only within an originating system",
+                "type": "string"
+              },
+              "modification_ts": {
+                "description": "when MLS Grid last modified this record (RFC3339 UTC)",
+                "type": "string"
+              },
+              "property_sub_type": {
+                "description": "RESO PropertySubType, e.g. Single Family Residence, Condominium",
+                "type": "string"
+              },
+              "property_type": {
+                "description": "RESO PropertyType, e.g. Residential, Residential Income",
+                "type": "string"
+              },
+              "similarity": {
+                "description": "0..1 heuristic similarity to the subject",
+                "type": "number"
+              },
+              "standard_status": {
+                "description": "RESO StandardStatus, e.g. Active, Closed, Pending",
+                "type": "string"
+              },
+              "year_built": {
+                "description": "year the structure was built",
+                "type": "integer"
+              }
+            },
+            "required": [
+              "listing_key",
+              "mls_number",
+              "address",
+              "modification_ts",
+              "similarity"
+            ],
+            "type": "object"
+          },
+          "type": [
+            "null",
+            "array"
+          ]
+        },
+        "count": {
+          "description": "number of comparables returned",
+          "type": "integer"
+        },
+        "data_as_of": {
+          "description": "how current the underlying data is (RFC3339 UTC)",
+          "type": "string"
+        },
+        "median_close_price": {
+          "description": "median comp sale price in whole US dollars",
+          "type": "integer"
+        },
+        "median_ppsf": {
+          "description": "median comp price per square foot in whole US dollars",
+          "type": "integer"
+        },
+        "suggested_high": {
+          "description": "high end of the suggested value range in whole US dollars",
+          "type": "integer"
+        },
+        "suggested_low": {
+          "description": "low end of the suggested value range in whole US dollars",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "comparables",
+        "count"
+      ],
+      "type": "object"
+    }
+  },
+  {
     "name": "get_data_freshness",
     "description": "Report how current the underlying MLS data is before you rely on the other tools.\n\nReturns, per synced resource, the replication cursor (newest listing update seen, whether the initial backfill finished, and when the last full reconcile ran), plus the listing corpus broken down by status, media download coverage, the schema-contract version the data conforms to, and when this snapshot was taken.\n\nUse it to decide whether the dataset is fresh enough to trust for an answer, to explain staleness to the user, or simply to confirm the sync pipeline is alive. Takes no arguments.",
     "input_schema": {
@@ -313,6 +577,90 @@
         "mls_number",
         "address",
         "modification_ts",
+        "data_as_of"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "price_history",
+    "description": "Return a listing's observed price and status change timeline.\n\nIdentify the listing the same way as get_listing: by listing_key (preferred) or by mls_number (add originating_system if the number exists in more than one feed). Returns each captured event (new listing, price change, status change, back on market, delisted) with its old/new value and when it was observed, plus total_reduction_pct (net list-price change as a percent of the first observed price; positive means the price came down) and days_since_last_change.\n\nImportant: history is best-effort from first sync forward — there is no event for a change that happened before this database began tracking the listing, so an empty or short timeline does not mean the listing never changed. Use it to spot motivated sellers (repeated cuts, long time since last change) and to explain a price's trajectory.",
+    "input_schema": {
+      "additionalProperties": false,
+      "properties": {
+        "listing_key": {
+          "description": "MLS Grid cross-MLS unique key (preferred, unambiguous)",
+          "type": "string"
+        },
+        "mls_number": {
+          "description": "human-facing MLS number; unique only within an originating system",
+          "type": "string"
+        },
+        "originating_system": {
+          "description": "originating system slug (e.g. mred) to disambiguate mls_number",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "output_schema": {
+      "additionalProperties": false,
+      "properties": {
+        "data_as_of": {
+          "description": "how current this listing's record is (RFC3339 UTC)",
+          "type": "string"
+        },
+        "days_since_last_change": {
+          "description": "whole days since the most recent observed change; 0 if none",
+          "type": "integer"
+        },
+        "events": {
+          "description": "observed changes, oldest first; may be empty",
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "event_type": {
+                "description": "one of new_listing, price_change, status_change, back_on_market, delisted",
+                "type": "string"
+              },
+              "new_value": {
+                "description": "new value; empty for delisted",
+                "type": "string"
+              },
+              "observed_at": {
+                "description": "when the sync observed the change (RFC3339 UTC)",
+                "type": "string"
+              },
+              "old_value": {
+                "description": "prior value; empty for new_listing",
+                "type": "string"
+              }
+            },
+            "required": [
+              "event_type",
+              "observed_at"
+            ],
+            "type": "object"
+          },
+          "type": [
+            "null",
+            "array"
+          ]
+        },
+        "listing_key": {
+          "description": "the listing this history belongs to",
+          "type": "string"
+        },
+        "total_reduction_pct": {
+          "description": "net list-price change as a percent of the first observed price; positive means a reduction",
+          "type": "number"
+        }
+      },
+      "required": [
+        "listing_key",
+        "events",
+        "total_reduction_pct",
+        "days_since_last_change",
         "data_as_of"
       ],
       "type": "object"
