@@ -33,6 +33,11 @@ var ErrNotImplemented = errors.New("mls: capability not implemented by this sour
 // ErrNotFound is returned when a lookup by key or MLS number matches nothing.
 var ErrNotFound = errors.New("mls: not found")
 
+// ErrAmbiguousRef is returned when a lookup by MLS number (without an
+// originating system) matches listings in more than one feed. The caller should
+// retry with ListingRef.OriginatingSystem set.
+var ErrAmbiguousRef = errors.New("mls: reference matches multiple originating systems; specify one")
+
 // Source is a read-only view over one or more MLS feeds. Implementations must
 // be safe for concurrent use: the MCP server may invoke tools from multiple
 // client requests at once.

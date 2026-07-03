@@ -41,7 +41,8 @@ func WithInfo(name, version string) Option {
 // caller owns both the server and the source's lifetime.
 //
 // Tools are registered milestone by milestone; today that is get_data_freshness
-// (B-M1). New does not take ownership of source and never closes it.
+// (B-M1) plus search_listings and get_listing (B-M2). New does not take
+// ownership of source and never closes it.
 func New(source mls.Source, opts ...Option) (*mcp.Server, error) {
 	if source == nil {
 		return nil, errors.New("server: source must not be nil")
@@ -53,5 +54,7 @@ func New(source mls.Source, opts ...Option) (*mcp.Server, error) {
 
 	srv := mcp.NewServer(&mcp.Implementation{Name: o.name, Version: o.version}, nil)
 	registerFreshness(srv, source)
+	registerSearch(srv, source)
+	registerListing(srv, source)
 	return srv, nil
 }

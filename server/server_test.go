@@ -12,13 +12,20 @@ import (
 	"github.com/piotrsenkow/mlsgrid-mcp/mls"
 )
 
-// fakeSource is a canned mls.Source for protocol-level tests. Only the methods
-// B-M1 exercises return data; the rest report ErrNotImplemented, matching how a
-// partially-built adapter behaves.
+// fakeSource is a canned mls.Source for protocol-level tests. Fields let a test
+// pin the value (or error) each tool returns so the wire path — input decoding,
+// handler, structured output — can be exercised without a database.
 type fakeSource struct {
-	freshness mls.Freshness
-	freshErr  error
-	closed    bool
+	freshness  mls.Freshness
+	freshErr   error
+	search     mls.Page[mls.ListingSummary]
+	searchErr  error
+	lastSearch mls.SearchQuery // captures the decoded query the tool passed in
+	listing    *mls.ListingDetail
+	listErr    error
+	lastRef    mls.ListingRef
+	lastOpts   mls.ListingOptions
+	closed     bool
 }
 
 func (f *fakeSource) Capabilities(context.Context) (mls.Capabilities, error) {
@@ -27,11 +34,14 @@ func (f *fakeSource) Capabilities(context.Context) (mls.Capabilities, error) {
 func (f *fakeSource) Freshness(context.Context) (mls.Freshness, error) {
 	return f.freshness, f.freshErr
 }
-func (f *fakeSource) SearchListings(context.Context, mls.SearchQuery) (mls.Page[mls.ListingSummary], error) {
-	return mls.Page[mls.ListingSummary]{}, mls.ErrNotImplemented
+func (f *fakeSource) SearchListings(_ context.Context, q mls.SearchQuery) (mls.Page[mls.ListingSummary], error) {
+	f.lastSearch = q
+	return f.search, f.searchErr
 }
-func (f *fakeSource) GetListing(context.Context, mls.ListingRef, mls.ListingOptions) (*mls.ListingDetail, error) {
-	return nil, mls.ErrNotImplemented
+func (f *fakeSource) GetListing(_ context.Context, ref mls.ListingRef, opts mls.ListingOptions) (*mls.ListingDetail, error) {
+	f.lastRef = ref
+	f.lastOpts = opts
+	return f.listing, f.listErr
 }
 func (f *fakeSource) FindComparables(context.Context, mls.CompsQuery) (*mls.CompsResult, error) {
 	return nil, mls.ErrNotImplemented
@@ -97,28 +107,42 @@ func TestNewRejectsNilSource(t *testing.T) {
 	}
 }
 
-func TestListToolsExposesFreshness(t *testing.T) {
+func TestListToolsExposesRegisteredTools(t *testing.T) {
 	cs := connect(t, &fakeSource{freshness: sampleFreshness()})
 
 	res, err := cs.ListTools(context.Background(), nil)
 	if err != nil {
 		t.Fatalf("ListTools: %v", err)
 	}
-	if len(res.Tools) != 1 {
-		t.Fatalf("expected exactly 1 tool, got %d", len(res.Tools))
+
+	// Every registered tool must advertise a description and both schemas so
+	// clients can call it and validate structured output. The exact wire shape
+	// is locked separately by TestToolsListGolden.
+	want := map[string]bool{
+		"get_data_freshness": false,
+		"search_listings":    false,
+		"get_listing":        false,
 	}
-	tool := res.Tools[0]
-	if tool.Name != "get_data_freshness" {
-		t.Errorf("tool name = %q, want get_data_freshness", tool.Name)
+	for _, tool := range res.Tools {
+		if _, ok := want[tool.Name]; !ok {
+			t.Errorf("unexpected tool registered: %q", tool.Name)
+			continue
+		}
+		want[tool.Name] = true
+		if tool.Description == "" {
+			t.Errorf("%s: empty description", tool.Name)
+		}
+		if tool.InputSchema == nil {
+			t.Errorf("%s: no input schema", tool.Name)
+		}
+		if tool.OutputSchema == nil {
+			t.Errorf("%s: no output schema (structured output should be inferred)", tool.Name)
+		}
 	}
-	if tool.Description == "" {
-		t.Error("tool description is empty")
-	}
-	if tool.InputSchema == nil {
-		t.Error("tool has no input schema")
-	}
-	if tool.OutputSchema == nil {
-		t.Error("tool has no output schema (structured output should be inferred)")
+	for name, seen := range want {
+		if !seen {
+			t.Errorf("expected tool %q was not registered", name)
+		}
 	}
 }
 
@@ -174,6 +198,149 @@ func TestCallGetDataFreshnessPropagatesError(t *testing.T) {
 	}
 	if !res.IsError {
 		t.Fatal("expected IsError result when the source fails")
+	}
+}
+
+func TestCallSearchListings(t *testing.T) {
+	lat := 41.88
+	src := &fakeSource{
+		search: mls.Page[mls.ListingSummary]{
+			Items: []mls.ListingSummary{
+				{
+					ListingKey: "MRD1001", MLSNumber: "1001", StandardStatus: "Active",
+					PropertyType: "Residential", PropertySubType: "Single Family Residence",
+					ListPrice: 350000, Bedrooms: 3, BathroomsFull: 2, LivingArea: 1800,
+					YearBuilt: 1995, DaysOnMarket: 10, Latitude: &lat,
+					Address:        mls.Address{StreetNumber: "934", StreetName: "Wolcott Ave", City: "Chicago", State: "IL", PostalCode: "60601"},
+					ModificationTS: time.Date(2026, 6, 1, 9, 0, 0, 0, time.UTC),
+				},
+				{ListingKey: "MRD1002", MLSNumber: "1002", StandardStatus: "Active", ListPrice: 250000},
+			},
+			NextCursor: "abc123",
+			DataAsOf:   time.Date(2026, 6, 12, 9, 0, 0, 0, time.UTC),
+		},
+	}
+	cs := connect(t, src)
+
+	res, err := cs.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "search_listings",
+		Arguments: map[string]any{
+			"city":      "Chicago",
+			"statuses":  []string{"Active"},
+			"min_price": 200000,
+			"limit":     2,
+		},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("tool reported error: %+v", res.Content)
+	}
+
+	// The tool decoded the arguments into the source query.
+	if src.lastSearch.Area.City != "Chicago" || src.lastSearch.MinPrice != 200000 ||
+		len(src.lastSearch.Statuses) != 1 || src.lastSearch.Statuses[0] != "Active" || src.lastSearch.Limit != 2 {
+		t.Errorf("decoded query = %+v", src.lastSearch)
+	}
+
+	var got searchOutput
+	remarshal(t, res.StructuredContent, &got)
+	if got.Count != 2 || len(got.Listings) != 2 {
+		t.Fatalf("count = %d, listings = %d, want 2/2", got.Count, len(got.Listings))
+	}
+	if got.NextCursor != "abc123" {
+		t.Errorf("next_cursor = %q, want abc123", got.NextCursor)
+	}
+	if got.DataAsOf != "2026-06-12T09:00:00Z" {
+		t.Errorf("data_as_of = %q", got.DataAsOf)
+	}
+	first := got.Listings[0]
+	if first.ListingKey != "MRD1001" || first.Address.City != "Chicago" || first.ListPrice != 350000 {
+		t.Errorf("first listing = %+v", first)
+	}
+	if first.Latitude == nil || *first.Latitude != 41.88 {
+		t.Errorf("latitude = %v, want 41.88", first.Latitude)
+	}
+}
+
+func TestCallGetListing(t *testing.T) {
+	src := &fakeSource{
+		listing: &mls.ListingDetail{
+			ListingSummary: mls.ListingSummary{
+				ListingKey: "MRD1003", MLSNumber: "1003", StandardStatus: "Closed",
+				ListPrice: 500000, ClosePrice: 485000, Bedrooms: 4,
+				Address:        mls.Address{StreetName: "N Ridge Ave", City: "Evanston", State: "IL"},
+				ModificationTS: time.Date(2026, 5, 20, 9, 0, 0, 0, time.UTC),
+			},
+			OriginalListPrice: 520000, TaxAnnualAmount: 8200, TaxYear: 2025,
+			ListAgentName: "Jane Broker", PhotosCount: 25,
+			Raw:      map[string]any{"MRD_extra": "legacy-field"},
+			DataAsOf: time.Date(2026, 5, 20, 9, 0, 0, 0, time.UTC),
+		},
+	}
+	cs := connect(t, src)
+
+	res, err := cs.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "get_listing",
+		Arguments: map[string]any{"listing_key": "MRD1003", "include_raw": true},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("tool reported error: %+v", res.Content)
+	}
+	if src.lastRef.Key != "MRD1003" || !src.lastOpts.IncludeRaw {
+		t.Errorf("decoded ref = %+v opts = %+v", src.lastRef, src.lastOpts)
+	}
+
+	var got listingDetailOut
+	remarshal(t, res.StructuredContent, &got)
+	if got.ListingKey != "MRD1003" || got.ListPrice != 500000 || got.OriginalListPrice != 520000 {
+		t.Errorf("detail = %+v", got)
+	}
+	if got.Address.StreetName != "N Ridge Ave" {
+		t.Errorf("street_name = %q", got.Address.StreetName)
+	}
+	if got.Raw["MRD_extra"] != "legacy-field" {
+		t.Errorf("raw = %v", got.Raw)
+	}
+	if got.DataAsOf != "2026-05-20T09:00:00Z" {
+		t.Errorf("data_as_of = %q", got.DataAsOf)
+	}
+}
+
+func TestCallGetListingMapsSourceErrors(t *testing.T) {
+	cases := map[string]error{
+		"not found": mls.ErrNotFound,
+		"ambiguous": mls.ErrAmbiguousRef,
+	}
+	for name, srcErr := range cases {
+		t.Run(name, func(t *testing.T) {
+			cs := connect(t, &fakeSource{listErr: srcErr})
+			res, err := cs.CallTool(context.Background(), &mcp.CallToolParams{
+				Name:      "get_listing",
+				Arguments: map[string]any{"mls_number": "9999"},
+			})
+			if err != nil {
+				return // transport-level error is also an acceptable failure
+			}
+			if !res.IsError {
+				t.Errorf("expected IsError result for %s", name)
+			}
+		})
+	}
+}
+
+func TestCallGetListingRequiresRef(t *testing.T) {
+	cs := connect(t, &fakeSource{})
+	res, err := cs.CallTool(context.Background(), &mcp.CallToolParams{Name: "get_listing"})
+	if err != nil {
+		return
+	}
+	if !res.IsError {
+		t.Error("expected IsError result when neither listing_key nor mls_number is given")
 	}
 }
 

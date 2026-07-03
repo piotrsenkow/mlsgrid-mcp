@@ -15,7 +15,7 @@ private data source implement `Source` out-of-tree and reuse every tool.
 
 ## Commands
 
-- `make build` / `make test` (unit, -race) / `make test-integration` (needs Docker; `//go:build integration`; lands B-M2)
+- `make build` / `make test` (unit, -race) / `make test-integration` (needs Docker; `//go:build integration`; builds a fixture DB from the pinned mlsgrid-sync migration)
 - `make lint` (golangci-lint) / `make fmt`
 - Run locally: `go run ./cmd/mlsgrid-mcp` (serves stdio) or `... check` (freshness readout)
 

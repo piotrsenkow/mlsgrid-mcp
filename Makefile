@@ -13,8 +13,9 @@ run: build
 test:
 	go test -race ./...
 
-# Integration tests build a fixture database and are tagged //go:build integration.
-# They need Docker (testcontainers). Land with the Postgres adapter tools (B-M2).
+# Integration tests build a fixture database from the pinned mlsgrid-sync
+# migration (the cross-repo contract test) and are tagged //go:build integration.
+# They need Docker (testcontainers).
 test-integration:
 	go test -race -tags integration ./...
 

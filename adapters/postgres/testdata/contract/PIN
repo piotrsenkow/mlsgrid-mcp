@@ -1,0 +1,27 @@
+# Pinned mlsgrid-sync schema contract
+
+The integration tests build their fixture database from mlsgrid-sync's schema
+migration, vendored here at a pinned release so the test is a *cross-repo
+contract test*: if mlsgrid-sync's schema drifts from what this adapter reads,
+refreshing the pin makes the change explicit and reviewable.
+
+    repo         github.com/piotrsenkow/mlsgrid-sync
+    tag          v0.1.0
+    commit       c5b3c55118eb3906431bab546bb5305c371157eb
+    file         internal/store/postgres/migrations/0001_init.sql
+    blob sha1    2a5f03f97ca0cd8ee2c11d743a2a05257d729546
+    contract     1.0.0 (major asserted by adapters/postgres.ExpectedContractMajor)
+
+## Refreshing the pin
+
+Re-vendor the migration from a newer mlsgrid-sync tag:
+
+    git -C <mlsgrid-sync> show <tag>:internal/store/postgres/migrations/0001_init.sql \
+        > adapters/postgres/testdata/contract/0001_init.sql
+
+then update the coordinates above and re-run `make test-integration`. A change
+here is a schema-contract event: bump ExpectedContractMajor only on a *major*
+contract bump, and update the tools/list golden if result shapes move.
+
+A live drift check (fetch the tag and diff against this copy in CI) lands in
+B-M6 per docs/ROADMAP.md; until then this file is the single source of the pin.

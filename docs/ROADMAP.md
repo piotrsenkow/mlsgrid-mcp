@@ -14,7 +14,7 @@ this server reads is owned by [mlsgrid-sync](https://github.com/piotrsenkow/mlsg
   contract-version assertion + `Capabilities` + `Freshness`. **`get_data_freshness`
   end-to-end** (in-memory protocol test + live check against a real synced DB) —
   proving the pipe from MCP client → tool → adapter → database.
-- [ ] **M2 — Postgres adapter query core.** `search_listings` + `get_listing`,
+- [x] **M2 — Postgres adapter query core.** `search_listings` + `get_listing`,
   fixtures built from mlsgrid-sync's migrations at a pinned tag + `seed.sql`
   (this is the cross-repo contract test), `tools/list` golden file, protocol
   `tools/call` tests per tool.

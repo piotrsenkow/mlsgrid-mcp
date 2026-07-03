@@ -1,0 +1,557 @@
+[
+  {
+    "name": "get_data_freshness",
+    "description": "Report how current the underlying MLS data is before you rely on the other tools.\n\nReturns, per synced resource, the replication cursor (newest listing update seen, whether the initial backfill finished, and when the last full reconcile ran), plus the listing corpus broken down by status, media download coverage, the schema-contract version the data conforms to, and when this snapshot was taken.\n\nUse it to decide whether the dataset is fresh enough to trust for an answer, to explain staleness to the user, or simply to confirm the sync pipeline is alive. Takes no arguments.",
+    "input_schema": {
+      "additionalProperties": false,
+      "type": "object"
+    },
+    "output_schema": {
+      "additionalProperties": false,
+      "properties": {
+        "contract_version": {
+          "description": "the mlsgrid-sync schema-contract version the data conforms to",
+          "type": "string"
+        },
+        "cursors": {
+          "description": "replication state per synced resource and MLS feed",
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "backfill_complete": {
+                "description": "whether the initial full import finished",
+                "type": "boolean"
+              },
+              "last_reconcile": {
+                "description": "when the last full-feed reconcile completed (RFC3339 UTC); empty if never",
+                "type": "string"
+              },
+              "originating_system": {
+                "description": "MLS feed slug, e.g. mred",
+                "type": "string"
+              },
+              "resource": {
+                "description": "RESO resource name, e.g. Property or OpenHouse",
+                "type": "string"
+              },
+              "stored_rows": {
+                "description": "rows of this resource held locally",
+                "type": "integer"
+              },
+              "watermark": {
+                "description": "newest ModificationTimestamp synced (RFC3339 UTC); empty before first sync",
+                "type": "string"
+              }
+            },
+            "required": [
+              "resource",
+              "originating_system",
+              "stored_rows",
+              "backfill_complete"
+            ],
+            "type": "object"
+          },
+          "type": [
+            "null",
+            "array"
+          ]
+        },
+        "data_as_of": {
+          "description": "newest listing modification timestamp (RFC3339 UTC) — how current the data is; empty if unknown",
+          "type": "string"
+        },
+        "generated_at": {
+          "description": "when this freshness snapshot was produced (RFC3339 UTC)",
+          "type": "string"
+        },
+        "listing_status_counts": {
+          "description": "listing counts by standard status, most populous first",
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "count": {
+                "type": "integer"
+              },
+              "status": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "status",
+              "count"
+            ],
+            "type": "object"
+          },
+          "type": [
+            "null",
+            "array"
+          ]
+        },
+        "media_counts": {
+          "description": "media rows by storage status (downloaded/pending/failed/skipped)",
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "count": {
+                "type": "integer"
+              },
+              "status": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "status",
+              "count"
+            ],
+            "type": "object"
+          },
+          "type": [
+            "null",
+            "array"
+          ]
+        },
+        "total_listings": {
+          "description": "total number of property listings stored",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "contract_version",
+        "total_listings",
+        "generated_at",
+        "cursors",
+        "listing_status_counts"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "get_listing",
+    "description": "Fetch full detail for one listing by its ListingKey or MLS number.\n\nPrefer listing_key (the cross-MLS unique key, e.g. MRD12345678) — it is unambiguous and is what search_listings returns. mls_number is the human-facing MLS number and is unique only within an originating system, so if the same number exists in more than one feed you must also pass originating_system; otherwise the lookup reports the reference as ambiguous.\n\nSet include_raw to also return the source's scope-filtered extra fields (investment/expense fields, feature arrays, MLS-local keys) as a raw JSON object — useful for details the curated columns do not cover.\n\nReturns list/original/close price (whole US dollars), beds/baths/size/year, address, agent and office, taxes and association fee, photo count and virtual tour, and a data_as_of timestamp. Money is whole dollars; coordinates are often absent.",
+    "input_schema": {
+      "additionalProperties": false,
+      "properties": {
+        "include_raw": {
+          "description": "also return the scope-filtered raw JSONB extras as a raw object",
+          "type": "boolean"
+        },
+        "listing_key": {
+          "description": "MLS Grid cross-MLS unique key (preferred, unambiguous)",
+          "type": "string"
+        },
+        "mls_number": {
+          "description": "human-facing MLS number; unique only within an originating system",
+          "type": "string"
+        },
+        "originating_system": {
+          "description": "originating system slug (e.g. mred) to disambiguate mls_number",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "output_schema": {
+      "additionalProperties": false,
+      "properties": {
+        "address": {
+          "additionalProperties": false,
+          "description": "decomposed street address and locality",
+          "properties": {
+            "city": {
+              "description": "city",
+              "type": "string"
+            },
+            "county": {
+              "description": "county or parish",
+              "type": "string"
+            },
+            "postal_code": {
+              "description": "postal code",
+              "type": "string"
+            },
+            "state": {
+              "description": "two-letter state or province",
+              "type": "string"
+            },
+            "street_name": {
+              "description": "street name including directional prefix/suffix as delivered",
+              "type": "string"
+            },
+            "street_number": {
+              "description": "street number as delivered",
+              "type": "string"
+            },
+            "unit_number": {
+              "description": "unit or apartment number, if any",
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
+        "association_fee": {
+          "description": "association/HOA fee in whole US dollars",
+          "type": "integer"
+        },
+        "bathrooms_full": {
+          "description": "full bathrooms",
+          "type": "integer"
+        },
+        "bathrooms_half": {
+          "description": "half bathrooms",
+          "type": "integer"
+        },
+        "bedrooms": {
+          "description": "total bedrooms",
+          "type": "integer"
+        },
+        "close_price": {
+          "description": "sale price in whole US dollars; present only for closed listings",
+          "type": "integer"
+        },
+        "data_as_of": {
+          "description": "how current this record is (its modification timestamp, RFC3339 UTC)",
+          "type": "string"
+        },
+        "days_on_market": {
+          "description": "days on market",
+          "type": "integer"
+        },
+        "latitude": {
+          "description": "latitude; often absent — many MLSs (incl. MRED) omit coordinates",
+          "type": [
+            "null",
+            "number"
+          ]
+        },
+        "list_agent_name": {
+          "description": "listing agent full name (attribution)",
+          "type": "string"
+        },
+        "list_office_name": {
+          "description": "listing office name (attribution)",
+          "type": "string"
+        },
+        "list_price": {
+          "description": "list price in whole US dollars",
+          "type": "integer"
+        },
+        "listing_key": {
+          "description": "MLS Grid cross-MLS unique key, e.g. MRD12345678; use it with get_listing",
+          "type": "string"
+        },
+        "living_area": {
+          "description": "living area in square feet",
+          "type": "integer"
+        },
+        "longitude": {
+          "description": "longitude; often absent",
+          "type": [
+            "null",
+            "number"
+          ]
+        },
+        "lot_size_acres": {
+          "description": "lot size in acres",
+          "type": "number"
+        },
+        "mls_number": {
+          "description": "human-facing MLS number (ListingId); unique only within an originating system",
+          "type": "string"
+        },
+        "modification_ts": {
+          "description": "when MLS Grid last modified this record (RFC3339 UTC)",
+          "type": "string"
+        },
+        "original_list_price": {
+          "description": "original list price in whole US dollars",
+          "type": "integer"
+        },
+        "photos_count": {
+          "description": "number of photos on the listing",
+          "type": "integer"
+        },
+        "property_sub_type": {
+          "description": "RESO PropertySubType, e.g. Single Family Residence, Condominium",
+          "type": "string"
+        },
+        "property_type": {
+          "description": "RESO PropertyType, e.g. Residential, Residential Income",
+          "type": "string"
+        },
+        "public_remarks": {
+          "description": "public marketing remarks",
+          "type": "string"
+        },
+        "raw": {
+          "additionalProperties": true,
+          "description": "scope-filtered raw extras; present only when include_raw is set",
+          "type": "object"
+        },
+        "standard_status": {
+          "description": "RESO StandardStatus, e.g. Active, Closed, Pending",
+          "type": "string"
+        },
+        "tax_annual_amount": {
+          "description": "annual property tax in whole US dollars",
+          "type": "integer"
+        },
+        "tax_year": {
+          "description": "tax year the amount applies to",
+          "type": "integer"
+        },
+        "virtual_tour_url": {
+          "description": "unbranded virtual tour URL, if any",
+          "type": "string"
+        },
+        "year_built": {
+          "description": "year the structure was built",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "listing_key",
+        "mls_number",
+        "address",
+        "modification_ts",
+        "data_as_of"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "search_listings",
+    "description": "Search the MLS listing corpus by area, status, type, price, size, and free text.\n\nUse this to find candidate properties before drilling into one with get_listing. All filters are optional and AND together; omit a filter to leave that dimension unconstrained. Money is in whole US dollars. Results are ordered newest-updated first.\n\nNotes for accurate use:\n- Area: set at most one of city / postal_code / county (state narrows further). Matching is case-insensitive and exact — pass \"Chicago\", not \"chicago area\".\n- statuses / property_types accept several values (OR within a field); a property_types value matches either PropertyType or PropertySubType.\n- keywords is a best-effort substring match over remarks and address (no full-text index), so it is a filter of last resort, not a semantic search.\n- Coordinates (latitude/longitude) are frequently absent — many MLSs, including MRED, omit them.\n- Paginate with the returned next_cursor (pass it back as cursor); an empty next_cursor means the last page. No grand total is returned — page through instead.\n\nPersonas: buyers/investors filter by area+price+beds; agents pull recent activity in a market; analysts sweep a status/type across a county.",
+    "input_schema": {
+      "additionalProperties": false,
+      "properties": {
+        "city": {
+          "description": "city to search within (case-insensitive exact match)",
+          "type": "string"
+        },
+        "county": {
+          "description": "county or parish to search within",
+          "type": "string"
+        },
+        "cursor": {
+          "description": "opaque pagination cursor from a prior result's next_cursor",
+          "type": "string"
+        },
+        "keywords": {
+          "description": "best-effort substring match over remarks and address",
+          "type": "string"
+        },
+        "limit": {
+          "description": "maximum results to return (default 25, capped at 100)",
+          "type": "integer"
+        },
+        "max_days_on_market": {
+          "description": "maximum days on market",
+          "type": "integer"
+        },
+        "max_living_area": {
+          "description": "maximum living area in square feet",
+          "type": "integer"
+        },
+        "max_price": {
+          "description": "maximum list price in whole US dollars",
+          "type": "integer"
+        },
+        "min_baths_full": {
+          "description": "minimum full bathrooms",
+          "type": "integer"
+        },
+        "min_beds": {
+          "description": "minimum total bedrooms",
+          "type": "integer"
+        },
+        "min_living_area": {
+          "description": "minimum living area in square feet",
+          "type": "integer"
+        },
+        "min_price": {
+          "description": "minimum list price in whole US dollars",
+          "type": "integer"
+        },
+        "min_year_built": {
+          "description": "earliest year built",
+          "type": "integer"
+        },
+        "postal_code": {
+          "description": "postal code to search within",
+          "type": "string"
+        },
+        "property_types": {
+          "description": "PropertyType or PropertySubType values to include; empty means any",
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "null",
+            "array"
+          ]
+        },
+        "state": {
+          "description": "two-letter state or province to narrow the area",
+          "type": "string"
+        },
+        "statuses": {
+          "description": "RESO StandardStatus values to include, e.g. [\"Active\",\"Pending\"]; empty means any",
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "null",
+            "array"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "output_schema": {
+      "additionalProperties": false,
+      "properties": {
+        "count": {
+          "description": "number of listings on this page",
+          "type": "integer"
+        },
+        "data_as_of": {
+          "description": "how current the underlying data is (newest record timestamp, RFC3339 UTC)",
+          "type": "string"
+        },
+        "listings": {
+          "description": "matching listings, newest-updated first",
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "address": {
+                "additionalProperties": false,
+                "description": "decomposed street address and locality",
+                "properties": {
+                  "city": {
+                    "description": "city",
+                    "type": "string"
+                  },
+                  "county": {
+                    "description": "county or parish",
+                    "type": "string"
+                  },
+                  "postal_code": {
+                    "description": "postal code",
+                    "type": "string"
+                  },
+                  "state": {
+                    "description": "two-letter state or province",
+                    "type": "string"
+                  },
+                  "street_name": {
+                    "description": "street name including directional prefix/suffix as delivered",
+                    "type": "string"
+                  },
+                  "street_number": {
+                    "description": "street number as delivered",
+                    "type": "string"
+                  },
+                  "unit_number": {
+                    "description": "unit or apartment number, if any",
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              },
+              "bathrooms_full": {
+                "description": "full bathrooms",
+                "type": "integer"
+              },
+              "bathrooms_half": {
+                "description": "half bathrooms",
+                "type": "integer"
+              },
+              "bedrooms": {
+                "description": "total bedrooms",
+                "type": "integer"
+              },
+              "close_price": {
+                "description": "sale price in whole US dollars; present only for closed listings",
+                "type": "integer"
+              },
+              "days_on_market": {
+                "description": "days on market",
+                "type": "integer"
+              },
+              "latitude": {
+                "description": "latitude; often absent — many MLSs (incl. MRED) omit coordinates",
+                "type": [
+                  "null",
+                  "number"
+                ]
+              },
+              "list_price": {
+                "description": "list price in whole US dollars",
+                "type": "integer"
+              },
+              "listing_key": {
+                "description": "MLS Grid cross-MLS unique key, e.g. MRD12345678; use it with get_listing",
+                "type": "string"
+              },
+              "living_area": {
+                "description": "living area in square feet",
+                "type": "integer"
+              },
+              "longitude": {
+                "description": "longitude; often absent",
+                "type": [
+                  "null",
+                  "number"
+                ]
+              },
+              "mls_number": {
+                "description": "human-facing MLS number (ListingId); unique only within an originating system",
+                "type": "string"
+              },
+              "modification_ts": {
+                "description": "when MLS Grid last modified this record (RFC3339 UTC)",
+                "type": "string"
+              },
+              "property_sub_type": {
+                "description": "RESO PropertySubType, e.g. Single Family Residence, Condominium",
+                "type": "string"
+              },
+              "property_type": {
+                "description": "RESO PropertyType, e.g. Residential, Residential Income",
+                "type": "string"
+              },
+              "standard_status": {
+                "description": "RESO StandardStatus, e.g. Active, Closed, Pending",
+                "type": "string"
+              },
+              "year_built": {
+                "description": "year the structure was built",
+                "type": "integer"
+              }
+            },
+            "required": [
+              "listing_key",
+              "mls_number",
+              "address",
+              "modification_ts"
+            ],
+            "type": "object"
+          },
+          "type": [
+            "null",
+            "array"
+          ]
+        },
+        "next_cursor": {
+          "description": "pass back as cursor to fetch the next page; empty on the last page",
+          "type": "string"
+        }
+      },
+      "required": [
+        "listings",
+        "count"
+      ],
+      "type": "object"
+    }
+  }
+]
