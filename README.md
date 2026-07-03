@@ -141,6 +141,7 @@ response. Full catalog in [docs/tools.md](docs/tools.md).
 | `price_history` | **live** | Observed price/status timeline and total reduction |
 | `market_stats` | **live** | Median/avg price, $/sqft, DOM, sale-to-list, inventory, months-of-supply |
 | `get_open_houses` | **live** | Scheduled open houses by area and date range |
+| `describe_dataset` | **live** | Self-describing schema: tables, columns, and the real values of categorical fields |
 | `query_sql` | **live** (opt-in) | Read-only SQL escape hatch — [off by default](#query_sql-opt-in-sql-escape-hatch) |
 
 ## Extending it

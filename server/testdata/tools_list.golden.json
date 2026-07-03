@@ -1,5 +1,123 @@
 [
   {
+    "name": "describe_dataset",
+    "description": "Describe the queryable dataset: its tables, their columns, and the real values of key categorical fields.\n\nCall this BEFORE writing query_sql, or whenever you need exact column names or valid filter values — the schema uses snake_case columns and case-sensitive values that are easy to guess wrong (a wrong guess silently returns zero rows). It returns each table's columns (name + SQL type + nullability) plus, for low-cardinality columns (status, type, event kind, …), the distinct values actually present, most common first, with counts. A \"(null)\" entry shows how often a column is empty — watch for fields that are mostly null.\n\nImportant: there are two status columns — standard_status (RESO-canonical; what search_listings and market_stats filter on) and mls_status (the MLS's own, more granular) — and they can spell the same concept differently (e.g. \"Canceled\" vs \"Cancelled\"). In raw SQL, use exactly the values this returns. Takes no arguments.",
+    "input_schema": {
+      "additionalProperties": false,
+      "type": "object"
+    },
+    "output_schema": {
+      "additionalProperties": false,
+      "properties": {
+        "data_as_of": {
+          "description": "how current the underlying data is (RFC3339 UTC)",
+          "type": "string"
+        },
+        "enums": {
+          "description": "observed distinct values of low-cardinality columns, most frequent first",
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "column": {
+                "type": "string"
+              },
+              "table": {
+                "type": "string"
+              },
+              "values": {
+                "description": "observed values (exact case), most frequent first; \"(null)\" is the empty bucket",
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "count": {
+                      "type": "integer"
+                    },
+                    "value": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "value",
+                    "count"
+                  ],
+                  "type": "object"
+                },
+                "type": [
+                  "null",
+                  "array"
+                ]
+              }
+            },
+            "required": [
+              "table",
+              "column",
+              "values"
+            ],
+            "type": "object"
+          },
+          "type": [
+            "null",
+            "array"
+          ]
+        },
+        "tables": {
+          "description": "queryable tables and their columns",
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "columns": {
+                "description": "columns in schema order",
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    },
+                    "nullable": {
+                      "type": "boolean"
+                    },
+                    "type": {
+                      "description": "SQL data type",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "name",
+                    "type",
+                    "nullable"
+                  ],
+                  "type": "object"
+                },
+                "type": [
+                  "null",
+                  "array"
+                ]
+              },
+              "name": {
+                "description": "table name (query it by this name; unqualified names resolve to the data schema)",
+                "type": "string"
+              }
+            },
+            "required": [
+              "name",
+              "columns"
+            ],
+            "type": "object"
+          },
+          "type": [
+            "null",
+            "array"
+          ]
+        }
+      },
+      "required": [
+        "tables",
+        "enums"
+      ],
+      "type": "object"
+    }
+  },
+  {
     "name": "get_comps",
     "description": "Find comparable recent sales for a property and summarize a suggested value range.\n\nGive a subject either by reference (listing_key, or mls_number [+ originating_system]) or inline: an area (city / postal_code / county — required unless you pass latitude+longitude) plus whatever you know (property_type, living_area, bedrooms, bathrooms_full, year_built).\n\nComps are recent CLOSED sales of the same product type in the subject's area (default: last ~180 days). When the subject has coordinates the pool is limited to a radius and distance feeds the score; most feeds (including MRED) omit coordinates, so comps then fall back to the same city/area and distance is omitted. Each comp carries a 0..1 similarity score (a heuristic over size, beds/baths, age, and distance when available) with short adjust_notes explaining it. The result includes median_close_price, median_ppsf, and a suggested_low/suggested_high range (interquartile $/sqft × the subject's size, or interquartile close price when size is unknown).\n\nUse it for a quick CMA (agents), resale/ARV sanity checks (investors), or to justify an offer (buyers). It is decision support, not an appraisal: with few nearby sales the range widens and confidence drops.",
     "input_schema": {
@@ -741,7 +859,7 @@
           "type": "string"
         },
         "property_types": {
-          "description": "limit to these PropertyType or PropertySubType values; empty means all types",
+          "description": "limit to these PropertyType (or PropertySubType) values (case-insensitive); e.g. Residential, Residential Lease, Residential Income, Land, Commercial Sale, Commercial Lease. Empty means all types",
           "items": {
             "type": "string"
           },
@@ -951,7 +1069,7 @@
   },
   {
     "name": "query_sql",
-    "description": "Run a single read-only SQL SELECT against the MLS database, for questions the curated tools can't express.\n\nPREFER THE CURATED TOOLS. search_listings, get_listing, get_comps, market_stats, price_history, and get_open_houses return documented, well-shaped results and should answer almost everything. Reach for query_sql only for a one-off aggregation, join, or filter the other tools don't cover.\n\nRules enforced by the server: exactly one statement; it must be a SELECT (or WITH … SELECT); writes, DDL, multiple statements, and server-side file/IO functions are rejected. The query runs in a read-only transaction under a short statement timeout, and results are row-capped — check \"truncated\" and raise max_rows or add your own LIMIT/aggregation if it is set.\n\nTable and column names follow the mlsgrid-sync schema contract, and unqualified names resolve to the data schema. To discover names, query information_schema (e.g. SELECT column_name FROM information_schema.columns WHERE table_schema = current_schema()). This tool is only present when the operator has explicitly enabled it against a least-privilege read-only role.",
+    "description": "Run a single read-only SQL SELECT against the MLS database, for questions the curated tools can't express.\n\nPREFER THE CURATED TOOLS. search_listings, get_listing, get_comps, market_stats, price_history, and get_open_houses return documented, well-shaped results and should answer almost everything. Reach for query_sql only for a one-off aggregation, join, or filter the other tools don't cover.\n\nRules enforced by the server: exactly one statement; it must be a SELECT (or WITH … SELECT); writes, DDL, multiple statements, and server-side file/IO functions are rejected. The query runs in a read-only transaction under a short statement timeout, and results are row-capped — check \"truncated\" and raise max_rows or add your own LIMIT/aggregation if it is set.\n\nTable and column names follow the mlsgrid-sync schema contract, and unqualified names resolve to the data schema. Call describe_dataset first to get exact column names and valid, correctly-cased filter values — the schema is snake_case and values are case-sensitive, so guessing (e.g. 'active' instead of 'Active') silently returns nothing. This tool is only present when the operator has explicitly enabled it against a least-privilege read-only role.",
     "input_schema": {
       "additionalProperties": false,
       "properties": {
@@ -1020,7 +1138,7 @@
   },
   {
     "name": "search_listings",
-    "description": "Search the MLS listing corpus by area, status, type, price, size, and free text.\n\nUse this to find candidate properties before drilling into one with get_listing. All filters are optional and AND together; omit a filter to leave that dimension unconstrained. Money is in whole US dollars. Results are ordered newest-updated first.\n\nNotes for accurate use:\n- Area: set at most one of city / postal_code / county (state narrows further). Matching is case-insensitive and exact — pass \"Chicago\", not \"chicago area\".\n- statuses / property_types accept several values (OR within a field); a property_types value matches either PropertyType or PropertySubType.\n- keywords is a best-effort substring match over remarks and address (no full-text index), so it is a filter of last resort, not a semantic search.\n- Coordinates (latitude/longitude) are frequently absent — many MLSs, including MRED, omit them.\n- Paginate with the returned next_cursor (pass it back as cursor); an empty next_cursor means the last page. No grand total is returned — page through instead.\n\nPersonas: buyers/investors filter by area+price+beds; agents pull recent activity in a market; analysts sweep a status/type across a county.",
+    "description": "Search the MLS listing corpus by area, status, type, price, size, and free text.\n\nUse this to find candidate properties before drilling into one with get_listing. All filters are optional and AND together; omit a filter to leave that dimension unconstrained. Money is in whole US dollars. Results are ordered newest-updated first.\n\nNotes for accurate use:\n- Area: set at most one of city / postal_code / county (state narrows further). Matching is case-insensitive and exact — pass \"Chicago\", not \"chicago area\".\n- statuses / property_types accept several values (OR within a field) and are matched case-insensitively; a property_types value matches either PropertyType or PropertySubType. Their valid values are listed on each field; call describe_dataset if unsure.\n- keywords is a best-effort substring match over remarks and address (no full-text index), so it is a filter of last resort, not a semantic search.\n- Coordinates (latitude/longitude) are frequently absent — many MLSs, including MRED, omit them.\n- total_matches is the count across all pages for these filters; paginate with next_cursor (pass it back as cursor), and an empty next_cursor means the last page.\n\nPersonas: buyers/investors filter by area+price+beds; agents pull recent activity in a market; analysts sweep a status/type across a county.",
     "input_schema": {
       "additionalProperties": false,
       "properties": {
@@ -1081,7 +1199,7 @@
           "type": "string"
         },
         "property_types": {
-          "description": "PropertyType or PropertySubType values to include; empty means any",
+          "description": "PropertyType (or PropertySubType) values to include (case-insensitive); valid PropertyType: Residential, Residential Lease, Residential Income, Land, Commercial Sale, Commercial Lease, Manufactured In Park, Farm, Business Opportunity. Empty means any",
           "items": {
             "type": "string"
           },
@@ -1095,7 +1213,7 @@
           "type": "string"
         },
         "statuses": {
-          "description": "RESO StandardStatus values to include, e.g. [\"Active\",\"Pending\"]; empty means any",
+          "description": "StandardStatus values to include (case-insensitive); valid: Active, Closed, Active Under Contract, Pending, Canceled, Expired, Hold. Empty means any",
           "items": {
             "type": "string"
           },
@@ -1245,6 +1363,13 @@
         "next_cursor": {
           "description": "pass back as cursor to fetch the next page; empty on the last page",
           "type": "string"
+        },
+        "total_matches": {
+          "description": "total listings matching the filters across all pages; absent if the source cannot count",
+          "type": [
+            "null",
+            "integer"
+          ]
         }
       },
       "required": [

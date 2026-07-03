@@ -41,6 +41,8 @@ type fakeSource struct {
 	sqlErr      error
 	lastSQL     string
 	lastMaxRows int
+	dataset     *mls.DatasetDescription
+	datasetErr  error
 	closed      bool
 }
 
@@ -79,6 +81,9 @@ func (f *fakeSource) QueryReadOnly(_ context.Context, query string, maxRows int)
 	f.lastSQL = query
 	f.lastMaxRows = maxRows
 	return f.sqlResult, f.sqlErr
+}
+func (f *fakeSource) DescribeDataset(context.Context) (*mls.DatasetDescription, error) {
+	return f.dataset, f.datasetErr
 }
 func (f *fakeSource) Close() error { f.closed = true; return nil }
 
@@ -160,6 +165,7 @@ func TestListToolsExposesRegisteredTools(t *testing.T) {
 		"get_comps":          false,
 		"market_stats":       false,
 		"get_open_houses":    false,
+		"describe_dataset":   false, // registered because fakeSource implements DatasetDescriber
 	}
 	for _, tool := range res.Tools {
 		if _, ok := want[tool.Name]; !ok {
@@ -255,6 +261,7 @@ func TestCallSearchListings(t *testing.T) {
 				{ListingKey: "MRD1002", MLSNumber: "1002", StandardStatus: "Active", ListPrice: 250000},
 			},
 			NextCursor: "abc123",
+			Total:      137,
 			DataAsOf:   time.Date(2026, 6, 12, 9, 0, 0, 0, time.UTC),
 		},
 	}
@@ -289,6 +296,9 @@ func TestCallSearchListings(t *testing.T) {
 	}
 	if got.NextCursor != "abc123" {
 		t.Errorf("next_cursor = %q, want abc123", got.NextCursor)
+	}
+	if got.TotalMatches == nil || *got.TotalMatches != 137 {
+		t.Errorf("total_matches = %v, want 137", got.TotalMatches)
 	}
 	if got.DataAsOf != "2026-06-12T09:00:00Z" {
 		t.Errorf("data_as_of = %q", got.DataAsOf)
@@ -699,6 +709,53 @@ func TestCallGetOpenHousesBadDate(t *testing.T) {
 	}
 	if !res.IsError {
 		t.Error("expected IsError result for an invalid date")
+	}
+}
+
+func TestCallDescribeDataset(t *testing.T) {
+	src := &fakeSource{
+		dataset: &mls.DatasetDescription{
+			Tables: []mls.TableDescription{{
+				Name: "property",
+				Columns: []mls.ColumnDescription{
+					{Name: "listing_key", Type: "text", Nullable: false},
+					{Name: "standard_status", Type: "text", Nullable: true},
+				},
+			}},
+			Enums: []mls.EnumDescription{{
+				Table:  "property",
+				Column: "standard_status",
+				Values: []mls.EnumValue{{Value: "Active", Count: 4668}, {Value: "Closed", Count: 1619}},
+			}},
+			DataAsOf: time.Date(2026, 7, 3, 6, 0, 0, 0, time.UTC),
+		},
+	}
+	cs := connect(t, src) // describe_dataset registers without WithSQL
+
+	res, err := cs.CallTool(context.Background(), &mcp.CallToolParams{Name: "describe_dataset"})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("tool reported error: %+v", res.Content)
+	}
+
+	var got describeOutput
+	remarshal(t, res.StructuredContent, &got)
+	if len(got.Tables) != 1 || got.Tables[0].Name != "property" || len(got.Tables[0].Columns) != 2 {
+		t.Fatalf("tables = %+v", got.Tables)
+	}
+	if got.Tables[0].Columns[0].Name != "listing_key" || got.Tables[0].Columns[0].Type != "text" {
+		t.Errorf("column[0] = %+v", got.Tables[0].Columns[0])
+	}
+	if len(got.Enums) != 1 || got.Enums[0].Column != "standard_status" || len(got.Enums[0].Values) != 2 {
+		t.Fatalf("enums = %+v", got.Enums)
+	}
+	if got.Enums[0].Values[0].Value != "Active" || got.Enums[0].Values[0].Count != 4668 {
+		t.Errorf("enum value[0] = %+v", got.Enums[0].Values[0])
+	}
+	if got.DataAsOf != "2026-07-03T06:00:00Z" {
+		t.Errorf("data_as_of = %q", got.DataAsOf)
 	}
 }
 

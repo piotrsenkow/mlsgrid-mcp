@@ -59,8 +59,9 @@ type Adapter struct {
 // compile-time assertions that Adapter satisfies the Source contract and the
 // optional SQL escape-hatch contract.
 var (
-	_ mls.Source     = (*Adapter)(nil)
-	_ mls.SQLQuerier = (*Adapter)(nil)
+	_ mls.Source           = (*Adapter)(nil)
+	_ mls.SQLQuerier       = (*Adapter)(nil)
+	_ mls.DatasetDescriber = (*Adapter)(nil)
 )
 
 // New opens a connection pool to dsn, validates the schema contract version,

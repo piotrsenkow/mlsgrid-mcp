@@ -314,3 +314,45 @@ type OpenHouseResult struct {
 	OpenHouses []OpenHouse
 	DataAsOf   time.Time
 }
+
+// ----------------------------------------------------------------------------
+// Dataset description — describe_dataset (B-M6).
+// ----------------------------------------------------------------------------
+
+// DatasetDescription is a self-describing snapshot of the queryable schema: the
+// tables and columns available, plus the observed distinct values of
+// low-cardinality columns. It exists so agents can filter with exact,
+// correctly-cased values and real column names rather than guessing.
+type DatasetDescription struct {
+	Tables   []TableDescription
+	Enums    []EnumDescription
+	DataAsOf time.Time
+}
+
+// TableDescription lists one table's queryable columns, in schema order.
+type TableDescription struct {
+	Name    string
+	Columns []ColumnDescription
+}
+
+// ColumnDescription is one column's name, SQL type, and nullability.
+type ColumnDescription struct {
+	Name     string
+	Type     string
+	Nullable bool
+}
+
+// EnumDescription reports the observed distinct values of a low-cardinality
+// column, most frequent first. Values are case-sensitive as stored; a NULL
+// bucket is surfaced as "(null)" so sparsity is visible.
+type EnumDescription struct {
+	Table  string
+	Column string
+	Values []EnumValue
+}
+
+// EnumValue is one observed value and how many rows carry it.
+type EnumValue struct {
+	Value string
+	Count int64
+}

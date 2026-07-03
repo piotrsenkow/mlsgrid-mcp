@@ -14,10 +14,10 @@ Use this to find candidate properties before drilling into one with get_listing.
 
 Notes for accurate use:
 - Area: set at most one of city / postal_code / county (state narrows further). Matching is case-insensitive and exact — pass "Chicago", not "chicago area".
-- statuses / property_types accept several values (OR within a field); a property_types value matches either PropertyType or PropertySubType.
+- statuses / property_types accept several values (OR within a field) and are matched case-insensitively; a property_types value matches either PropertyType or PropertySubType. Their valid values are listed on each field; call describe_dataset if unsure.
 - keywords is a best-effort substring match over remarks and address (no full-text index), so it is a filter of last resort, not a semantic search.
 - Coordinates (latitude/longitude) are frequently absent — many MLSs, including MRED, omit them.
-- Paginate with the returned next_cursor (pass it back as cursor); an empty next_cursor means the last page. No grand total is returned — page through instead.
+- total_matches is the count across all pages for these filters; paginate with next_cursor (pass it back as cursor), and an empty next_cursor means the last page.
 
 Personas: buyers/investors filter by area+price+beds; agents pull recent activity in a market; analysts sweep a status/type across a county.`
 
@@ -28,8 +28,8 @@ type searchInput struct {
 	PostalCode      string   `json:"postal_code,omitempty" jsonschema:"postal code to search within"`
 	County          string   `json:"county,omitempty" jsonschema:"county or parish to search within"`
 	State           string   `json:"state,omitempty" jsonschema:"two-letter state or province to narrow the area"`
-	Statuses        []string `json:"statuses,omitempty" jsonschema:"RESO StandardStatus values to include, e.g. [\"Active\",\"Pending\"]; empty means any"`
-	PropertyTypes   []string `json:"property_types,omitempty" jsonschema:"PropertyType or PropertySubType values to include; empty means any"`
+	Statuses        []string `json:"statuses,omitempty" jsonschema:"StandardStatus values to include (case-insensitive); valid: Active, Closed, Active Under Contract, Pending, Canceled, Expired, Hold. Empty means any"`
+	PropertyTypes   []string `json:"property_types,omitempty" jsonschema:"PropertyType (or PropertySubType) values to include (case-insensitive); valid PropertyType: Residential, Residential Lease, Residential Income, Land, Commercial Sale, Commercial Lease, Manufactured In Park, Farm, Business Opportunity. Empty means any"`
 	MinPrice        int64    `json:"min_price,omitempty" jsonschema:"minimum list price in whole US dollars"`
 	MaxPrice        int64    `json:"max_price,omitempty" jsonschema:"maximum list price in whole US dollars"`
 	MinBeds         int      `json:"min_beds,omitempty" jsonschema:"minimum total bedrooms"`
@@ -45,10 +45,11 @@ type searchInput struct {
 
 // searchOutput is the wire shape of search_listings.
 type searchOutput struct {
-	Listings   []listingSummaryOut `json:"listings" jsonschema:"matching listings, newest-updated first"`
-	Count      int                 `json:"count" jsonschema:"number of listings on this page"`
-	NextCursor string              `json:"next_cursor,omitempty" jsonschema:"pass back as cursor to fetch the next page; empty on the last page"`
-	DataAsOf   string              `json:"data_as_of,omitempty" jsonschema:"how current the underlying data is (newest record timestamp, RFC3339 UTC)"`
+	Listings     []listingSummaryOut `json:"listings" jsonschema:"matching listings, newest-updated first"`
+	Count        int                 `json:"count" jsonschema:"number of listings on this page"`
+	TotalMatches *int64              `json:"total_matches,omitempty" jsonschema:"total listings matching the filters across all pages; absent if the source cannot count"`
+	NextCursor   string              `json:"next_cursor,omitempty" jsonschema:"pass back as cursor to fetch the next page; empty on the last page"`
+	DataAsOf     string              `json:"data_as_of,omitempty" jsonschema:"how current the underlying data is (newest record timestamp, RFC3339 UTC)"`
 }
 
 func registerSearch(srv *mcp.Server, source mls.Source) {
@@ -64,6 +65,10 @@ func registerSearch(srv *mcp.Server, source mls.Source) {
 			Count:      len(page.Items),
 			NextCursor: page.NextCursor,
 			DataAsOf:   formatTime(page.DataAsOf),
+		}
+		if page.Total >= 0 {
+			total := page.Total
+			out.TotalMatches = &total
 		}
 		out.Listings = make([]listingSummaryOut, 0, len(page.Items))
 		for _, s := range page.Items {

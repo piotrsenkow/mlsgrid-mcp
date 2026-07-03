@@ -13,7 +13,7 @@ import (
 func TestBuildSearchWhereEmpty(t *testing.T) {
 	var a Adapter
 	var args argList
-	where, err := a.buildSearchWhere(&args, mls.SearchQuery{})
+	where, err := a.buildSearchWhere(&args, mls.SearchQuery{}, true)
 	if err != nil {
 		t.Fatalf("buildSearchWhere: %v", err)
 	}
@@ -42,7 +42,7 @@ func TestBuildSearchWhereFilters(t *testing.T) {
 		MaxDaysOnMarket: 60,
 		Keywords:        "lake view",
 	}
-	where, err := a.buildSearchWhere(&args, q)
+	where, err := a.buildSearchWhere(&args, q, true)
 	if err != nil {
 		t.Fatalf("buildSearchWhere: %v", err)
 	}
@@ -62,9 +62,10 @@ func TestBuildSearchWhereFilters(t *testing.T) {
 	if !strings.Contains(where, "lower(city) = lower(") {
 		t.Errorf("city predicate missing lower(): %s", where)
 	}
-	// property_types matches PropertyType OR PropertySubType off one placeholder.
-	if !strings.Contains(where, "property_type = ANY(") || !strings.Contains(where, "property_sub_type = ANY(") {
-		t.Errorf("property_types should match type and subtype: %s", where)
+	// property_types matches PropertyType OR PropertySubType off one placeholder,
+	// case-insensitively.
+	if !strings.Contains(where, "lower(property_type) = ANY(") || !strings.Contains(where, "lower(property_sub_type) = ANY(") {
+		t.Errorf("property_types should match type and subtype case-insensitively: %s", where)
 	}
 	// Keyword arg is a wrapped, escaped LIKE pattern.
 	last := args.args[len(args.args)-1]
@@ -77,7 +78,7 @@ func TestBuildSearchWhereCursorPredicate(t *testing.T) {
 	var a Adapter
 	var args argList
 	cur := searchCursor{ModTS: time.Date(2026, 6, 5, 9, 0, 0, 0, time.UTC), Key: "MRD1002"}
-	where, err := a.buildSearchWhere(&args, mls.SearchQuery{Cursor: cur.encode()})
+	where, err := a.buildSearchWhere(&args, mls.SearchQuery{Cursor: cur.encode()}, true)
 	if err != nil {
 		t.Fatalf("buildSearchWhere: %v", err)
 	}
@@ -95,7 +96,7 @@ func TestBuildSearchWhereCursorPredicate(t *testing.T) {
 func TestBuildSearchWhereRejectsBadCursor(t *testing.T) {
 	var a Adapter
 	var args argList
-	if _, err := a.buildSearchWhere(&args, mls.SearchQuery{Cursor: "!!!bad"}); err == nil {
+	if _, err := a.buildSearchWhere(&args, mls.SearchQuery{Cursor: "!!!bad"}, true); err == nil {
 		t.Error("expected error for malformed cursor")
 	}
 }

@@ -247,6 +247,37 @@ been cancelled.
 }
 ```
 
+### `describe_dataset`
+
+Returns the queryable schema live: every table's columns (name, SQL type,
+nullability) plus the observed distinct values of low-cardinality columns
+(status, type, event kind, media state…), most frequent first, with counts and a
+`(null)` bucket. Takes no arguments.
+
+Agents call it to learn exact **snake_case** column names and valid,
+correctly-cased filter values before writing `query_sql` (or to pick the right
+`statuses` / `property_types` for the curated tools). It surfaces the two status
+columns — `standard_status` (RESO-canonical, what the curated tools filter on)
+and `mls_status` (the MLS's own, more granular) — which is where guessing usually
+goes wrong. See [schema-reference.md](schema-reference.md) for the human version.
+
+```json
+// response (abridged)
+{
+  "tables": [
+    { "name": "property", "columns": [
+      { "name": "listing_key", "type": "text", "nullable": false },
+      { "name": "list_price", "type": "numeric", "nullable": true }
+    ] }
+  ],
+  "enums": [
+    { "table": "property", "column": "standard_status",
+      "values": [ { "value": "Active", "count": 4668 }, { "value": "Closed", "count": 1619 } ] }
+  ],
+  "data_as_of": "2026-07-03T06:18:03Z"
+}
+```
+
 ### `query_sql` (opt-in, off by default)
 
 An escape hatch for questions the curated tools can't express: run a single

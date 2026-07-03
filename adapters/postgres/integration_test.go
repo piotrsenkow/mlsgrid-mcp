@@ -162,8 +162,8 @@ func TestSearchOrderAndDefaults(t *testing.T) {
 	if page.NextCursor != "" {
 		t.Errorf("NextCursor = %q, want empty (12 < default 25)", page.NextCursor)
 	}
-	if page.Total != -1 {
-		t.Errorf("Total = %d, want -1 (unknown by design)", page.Total)
+	if page.Total != 12 {
+		t.Errorf("Total = %d, want 12 (unfiltered count of the whole seed)", page.Total)
 	}
 	want := time.Date(2026, 6, 12, 9, 0, 0, 0, time.UTC)
 	if !page.DataAsOf.Equal(want) {

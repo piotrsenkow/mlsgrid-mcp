@@ -26,7 +26,7 @@ type statsInput struct {
 	PostalCode     string   `json:"postal_code,omitempty" jsonschema:"area: postal code"`
 	County         string   `json:"county,omitempty" jsonschema:"area: county or parish"`
 	State          string   `json:"state,omitempty" jsonschema:"area: two-letter state or province"`
-	PropertyTypes  []string `json:"property_types,omitempty" jsonschema:"limit to these PropertyType or PropertySubType values; empty means all types"`
+	PropertyTypes  []string `json:"property_types,omitempty" jsonschema:"limit to these PropertyType (or PropertySubType) values (case-insensitive); e.g. Residential, Residential Lease, Residential Income, Land, Commercial Sale, Commercial Lease. Empty means all types"`
 	PeriodDays     int      `json:"period_days,omitempty" jsonschema:"trailing window in days for closed-sale metrics (default 90)"`
 	CompareToPrior bool     `json:"compare_to_prior,omitempty" jsonschema:"also aggregate the immediately preceding window and return it as prior"`
 }
