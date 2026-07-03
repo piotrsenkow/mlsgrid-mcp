@@ -71,6 +71,11 @@ func New(source mls.Source, opts ...Option) (*mcp.Server, error) {
 	registerComps(srv, source)
 	registerStats(srv, source)
 	registerOpenHouses(srv, source)
+	// describe_dataset is registered whenever the source can describe itself — it
+	// is read-only metadata that helps agents use every other tool correctly.
+	if d, ok := source.(mls.DatasetDescriber); ok {
+		registerDescribe(srv, d)
+	}
 	if o.sql {
 		if q, ok := source.(mls.SQLQuerier); ok {
 			registerQuerySQL(srv, q)

@@ -29,7 +29,7 @@ func (a *Adapter) SearchListings(ctx context.Context, q mls.SearchQuery) (mls.Pa
 	}
 
 	var args argList
-	where, err := a.buildSearchWhere(&args, q)
+	where, err := a.buildSearchWhere(&args, q, true)
 	if err != nil {
 		return mls.Page[mls.ListingSummary]{}, err
 	}
@@ -59,12 +59,7 @@ func (a *Adapter) SearchListings(ctx context.Context, q mls.SearchQuery) (mls.Pa
 		return mls.Page[mls.ListingSummary]{}, fmt.Errorf("search: rows: %w", err)
 	}
 
-	page := mls.Page[mls.ListingSummary]{
-		// Total is deliberately unknown: keyset search runs as a single query and
-		// a filtered COUNT(*) over a large corpus is exactly the cost this design
-		// avoids. Clients should page rather than expect a grand total.
-		Total: -1,
-	}
+	var page mls.Page[mls.ListingSummary]
 	if len(items) > limit {
 		last := items[limit-1]
 		page.NextCursor = searchCursor{ModTS: last.ModificationTS, Key: last.ListingKey}.encode()
@@ -72,15 +67,43 @@ func (a *Adapter) SearchListings(ctx context.Context, q mls.SearchQuery) (mls.Pa
 	}
 	page.Items = items
 
+	// Total is the count across all pages for the same filters (excluding the
+	// cursor). "How many match?" is the most common follow-up to a search, and
+	// without it the caller is pushed toward raw SQL just to count. A filtered
+	// COUNT over the property table is cheap for the typical scoped query.
+	total, err := a.countListings(ctx, q)
+	if err != nil {
+		return mls.Page[mls.ListingSummary]{}, err
+	}
+	page.Total = total
+
 	if newest, ok, err := a.maxTimestamp(ctx, "property", "modification_timestamp"); err == nil {
 		page.DataAsOf = orZeroTime(newest, ok)
 	}
 	return page, nil
 }
 
+// countListings returns how many listings match the query's filters, ignoring
+// pagination (cursor + limit).
+func (a *Adapter) countListings(ctx context.Context, q mls.SearchQuery) (int64, error) {
+	var args argList
+	where, err := a.buildSearchWhere(&args, q, false)
+	if err != nil {
+		return 0, err
+	}
+	var total int64
+	sql := "SELECT count(*) FROM " + a.rel("property") + where
+	if err := a.pool.QueryRow(ctx, sql, args.args...).Scan(&total); err != nil {
+		return 0, fmt.Errorf("search: count: %w", err)
+	}
+	return total, nil
+}
+
 // buildSearchWhere appends the parameterized predicates for q to args and
 // returns the WHERE clause (with a leading " WHERE ", or "" when unfiltered).
-func (a *Adapter) buildSearchWhere(args *argList, q mls.SearchQuery) (string, error) {
+// When includeCursor is false the pagination predicate is omitted, which is what
+// the count query wants (it counts all matches, not just those after the cursor).
+func (a *Adapter) buildSearchWhere(args *argList, q mls.SearchQuery, includeCursor bool) (string, error) {
 	var conds []string
 	add := func(c string) { conds = append(conds, c) }
 
@@ -99,14 +122,17 @@ func (a *Adapter) buildSearchWhere(args *argList, q mls.SearchQuery) (string, er
 		add("lower(state_or_province) = lower(" + args.add(v) + ")")
 	}
 
+	// Status and type values are matched case-insensitively: the stored values
+	// are exact-cased RESO enums (e.g. "Active"), and a caller passing "active"
+	// should not silently get zero rows.
 	if vals := nonEmpty(q.Statuses); len(vals) > 0 {
-		add("standard_status = ANY(" + args.add(vals) + ")")
+		add("lower(standard_status) = ANY(" + args.add(lowerAll(vals)) + ")")
 	}
 	if vals := nonEmpty(q.PropertyTypes); len(vals) > 0 {
 		// A caller's "type" may name either a PropertyType or a PropertySubType;
 		// match against both so "Condominium" finds subtyped rows.
-		p := args.add(vals)
-		add("(property_type = ANY(" + p + ") OR property_sub_type = ANY(" + p + "))")
+		p := args.add(lowerAll(vals))
+		add("(lower(property_type) = ANY(" + p + ") OR lower(property_sub_type) = ANY(" + p + "))")
 	}
 
 	if q.MinPrice > 0 {
@@ -144,7 +170,7 @@ func (a *Adapter) buildSearchWhere(args *argList, q mls.SearchQuery) (string, er
 			coalesce(city,'') || ' ' || coalesce(postal_code,'')) ILIKE %s`, pat))
 	}
 
-	if q.Cursor != "" {
+	if includeCursor && q.Cursor != "" {
 		c, err := decodeCursor(q.Cursor)
 		if err != nil {
 			return "", err
@@ -179,6 +205,15 @@ func nonEmpty(in []string) []string {
 		if t := strings.TrimSpace(s); t != "" {
 			out = append(out, t)
 		}
+	}
+	return out
+}
+
+// lowerAll lowercases every element, for case-insensitive ANY() matching.
+func lowerAll(in []string) []string {
+	out := make([]string, len(in))
+	for i, s := range in {
+		out[i] = strings.ToLower(s)
 	}
 	return out
 }

@@ -14,7 +14,7 @@ PREFER THE CURATED TOOLS. search_listings, get_listing, get_comps, market_stats,
 
 Rules enforced by the server: exactly one statement; it must be a SELECT (or WITH … SELECT); writes, DDL, multiple statements, and server-side file/IO functions are rejected. The query runs in a read-only transaction under a short statement timeout, and results are row-capped — check "truncated" and raise max_rows or add your own LIMIT/aggregation if it is set.
 
-Table and column names follow the mlsgrid-sync schema contract, and unqualified names resolve to the data schema. To discover names, query information_schema (e.g. SELECT column_name FROM information_schema.columns WHERE table_schema = current_schema()). This tool is only present when the operator has explicitly enabled it against a least-privilege read-only role.`
+Table and column names follow the mlsgrid-sync schema contract, and unqualified names resolve to the data schema. Call describe_dataset first to get exact column names and valid, correctly-cased filter values — the schema is snake_case and values are case-sensitive, so guessing (e.g. 'active' instead of 'Active') silently returns nothing. This tool is only present when the operator has explicitly enabled it against a least-privilege read-only role.`
 
 // querySQLInput is the query_sql request. Field names/tags are a public
 // contract locked by the tools/list golden test.

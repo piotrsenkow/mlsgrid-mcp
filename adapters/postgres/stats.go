@@ -176,8 +176,8 @@ func areaTypeConds(args *argList, area mls.Area, types []string) []string {
 		conds = append(conds, "lower(state_or_province) = lower("+args.add(v)+")")
 	}
 	if vals := nonEmpty(types); len(vals) > 0 {
-		p := args.add(vals)
-		conds = append(conds, "(property_type = ANY("+p+") OR property_sub_type = ANY("+p+"))")
+		p := args.add(lowerAll(vals))
+		conds = append(conds, "(lower(property_type) = ANY("+p+") OR lower(property_sub_type) = ANY("+p+"))")
 	}
 	return conds
 }

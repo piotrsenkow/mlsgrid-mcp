@@ -13,9 +13,14 @@ price history, open houses, freshness), plus `Capabilities` so tools can degrade
 gracefully when a source lacks a feature (e.g. no coordinates → no distance in
 comps). See [`mls/source.go`](../mls/source.go) for the full contract.
 
-A source may *also* implement the optional `mls.SQLQuerier` to back the opt-in
-`query_sql` tool. That is deliberately separate: exposing SQL is off unless both
-the server is configured for it and the source supports it.
+A source may *also* implement two optional capabilities, each of which lights up
+its tool automatically when present:
+
+- `mls.DatasetDescriber` → **describe_dataset**, a live view of the queryable
+  schema (columns + the real distinct values of categorical fields) so agents
+  filter with exact values instead of guessing.
+- `mls.SQLQuerier` → the opt-in **query_sql** escape hatch. This one is
+  additionally gated on server configuration (off unless explicitly enabled).
 
 ## The default adapter
 

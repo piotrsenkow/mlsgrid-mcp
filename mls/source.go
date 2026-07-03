@@ -101,6 +101,16 @@ type SQLQuerier interface {
 	QueryReadOnly(ctx context.Context, query string, maxRows int) (*ResultSet, error)
 }
 
+// DatasetDescriber is an optional capability a Source may implement to back the
+// describe_dataset tool: a live, self-describing view of the queryable schema —
+// table and column names plus the observed distinct values of low-cardinality
+// columns. It lets an agent learn exact column names and valid, correctly-cased
+// filter values instead of guessing them (which silently returns nothing). When
+// a source implements it, the server registers describe_dataset automatically.
+type DatasetDescriber interface {
+	DescribeDataset(ctx context.Context) (*DatasetDescription, error)
+}
+
 // ListingRef identifies a listing either by its cross-MLS ListingKey (e.g.
 // "MRD12345678") or by the human-facing MLS number scoped to an originating
 // system. Exactly one form should be set; Key takes precedence when both are.
