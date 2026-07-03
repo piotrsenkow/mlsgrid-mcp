@@ -2,7 +2,7 @@ BINARY  := mlsgrid-mcp
 VERSION ?= dev
 LDFLAGS := -X github.com/piotrsenkow/mlsgrid-mcp/internal/cli.version=$(VERSION)
 
-.PHONY: build run test test-integration lint fmt tidy docker-build clean
+.PHONY: build run test test-integration verify-pin lint fmt tidy docker-build clean
 
 build:
 	CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o bin/$(BINARY) ./cmd/$(BINARY)
@@ -18,6 +18,11 @@ test:
 # They need Docker (testcontainers).
 test-integration:
 	go test -race -tags integration ./...
+
+# Verify the vendored mlsgrid-sync migration still matches its upstream pin —
+# keeps the cross-repo contract test honest. Runs in CI as the contract-drift job.
+verify-pin:
+	./scripts/verify-contract-pin.sh
 
 lint:
 	golangci-lint run

@@ -23,5 +23,8 @@ then update the coordinates above and re-run `make test-integration`. A change
 here is a schema-contract event: bump ExpectedContractMajor only on a *major*
 contract bump, and update the tools/list golden if result shapes move.
 
-A live drift check (fetch the tag and diff against this copy in CI) lands in
-B-M6 per docs/ROADMAP.md; until then this file is the single source of the pin.
+A live drift check runs in CI (the `contract-drift` job, `make verify-pin`):
+it re-derives the blob sha1 from the vendored copy and diffs it against the
+file fetched from mlsgrid-sync at the commit above, so a moved tag or a
+hand-edited vendor fails the build. This file stays the single source of truth
+for the pin — the check reads its coordinates.

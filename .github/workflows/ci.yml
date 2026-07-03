@@ -52,3 +52,12 @@ jobs:
         with:
           go-version-file: go.mod
       - run: CGO_ENABLED=0 GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} go build ./...
+
+  # Verify the vendored mlsgrid-sync migration still matches its upstream pin, so
+  # a moved tag or a hand-edited vendor can't silently invalidate the contract
+  # test. No Go build needed — it diffs the pinned blob against upstream.
+  contract-drift:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - run: ./scripts/verify-contract-pin.sh
