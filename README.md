@@ -50,6 +50,15 @@ or:
 go install github.com/piotrsenkow/mlsgrid-mcp/cmd/mlsgrid-mcp@latest
 ```
 
+Or run the released container image (published per release to GitHub Container
+Registry):
+
+```sh
+docker run --rm -i \
+  -e MLSGRID_MCP_DATABASE_URL=postgres://user:pass@host:5432/mls \
+  ghcr.io/piotrsenkow/mlsgrid-mcp:latest
+```
+
 Point it at the database `mlsgrid-sync` produced and verify the connection:
 
 ```sh
