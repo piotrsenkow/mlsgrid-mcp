@@ -37,6 +37,10 @@ type fakeSource struct {
 	openHouses  mls.OpenHouseResult
 	ohErr       error
 	lastOH      mls.OpenHouseQuery
+	sqlResult   *mls.ResultSet
+	sqlErr      error
+	lastSQL     string
+	lastMaxRows int
 	closed      bool
 }
 
@@ -71,6 +75,11 @@ func (f *fakeSource) OpenHouses(_ context.Context, q mls.OpenHouseQuery) (mls.Op
 	f.lastOH = q
 	return f.openHouses, f.ohErr
 }
+func (f *fakeSource) QueryReadOnly(_ context.Context, query string, maxRows int) (*mls.ResultSet, error) {
+	f.lastSQL = query
+	f.lastMaxRows = maxRows
+	return f.sqlResult, f.sqlErr
+}
 func (f *fakeSource) Close() error { f.closed = true; return nil }
 
 func sampleFreshness() mls.Freshness {
@@ -98,9 +107,18 @@ func sampleFreshness() mls.Freshness {
 // connect wires an in-memory client to a server backed by source and returns
 // the client session.
 func connect(t *testing.T, source mls.Source) *mcp.ClientSession {
+	return connectOpts(t, source)
+}
+
+// connectSQL is connect with the opt-in query_sql tool enabled.
+func connectSQL(t *testing.T, source mls.Source) *mcp.ClientSession {
+	return connectOpts(t, source, WithSQL(true))
+}
+
+func connectOpts(t *testing.T, source mls.Source, extra ...Option) *mcp.ClientSession {
 	t.Helper()
 	ctx := context.Background()
-	srv, err := New(source, WithInfo("mlsgrid-mcp-test", "test"))
+	srv, err := New(source, append([]Option{WithInfo("mlsgrid-mcp-test", "test")}, extra...)...)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -681,6 +699,104 @@ func TestCallGetOpenHousesBadDate(t *testing.T) {
 	}
 	if !res.IsError {
 		t.Error("expected IsError result for an invalid date")
+	}
+}
+
+func TestQuerySQLDisabledByDefault(t *testing.T) {
+	// The source implements SQLQuerier, but without WithSQL the tool must not be
+	// registered — the escape hatch is opt-in.
+	cs := connect(t, &fakeSource{freshness: sampleFreshness()})
+	res, err := cs.ListTools(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("ListTools: %v", err)
+	}
+	for _, tool := range res.Tools {
+		if tool.Name == "query_sql" {
+			t.Fatal("query_sql registered without WithSQL; it must be opt-in")
+		}
+	}
+}
+
+func TestQuerySQLRegisteredWhenEnabled(t *testing.T) {
+	cs := connectSQL(t, &fakeSource{freshness: sampleFreshness()})
+	res, err := cs.ListTools(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("ListTools: %v", err)
+	}
+	found := false
+	for _, tool := range res.Tools {
+		if tool.Name == "query_sql" {
+			found = true
+			if tool.OutputSchema == nil {
+				t.Error("query_sql: no output schema inferred")
+			}
+		}
+	}
+	if !found {
+		t.Error("query_sql not registered despite WithSQL(true)")
+	}
+}
+
+func TestCallQuerySQL(t *testing.T) {
+	src := &fakeSource{
+		sqlResult: &mls.ResultSet{
+			Columns:   []string{"city", "n"},
+			Rows:      [][]any{{"Chicago", int64(7)}, {"Evanston", int64(2)}},
+			Truncated: true,
+			DataAsOf:  time.Date(2026, 6, 30, 9, 0, 0, 0, time.UTC),
+		},
+	}
+	cs := connectSQL(t, src)
+
+	res, err := cs.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "query_sql",
+		Arguments: map[string]any{
+			"query":    "SELECT city, count(*) AS n FROM property GROUP BY city",
+			"max_rows": 2,
+		},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("tool reported error: %+v", res.Content)
+	}
+	// Arguments decoded and forwarded verbatim to the source.
+	if src.lastSQL != "SELECT city, count(*) AS n FROM property GROUP BY city" || src.lastMaxRows != 2 {
+		t.Errorf("forwarded query = %q max_rows = %d", src.lastSQL, src.lastMaxRows)
+	}
+
+	var got querySQLOutput
+	remarshal(t, res.StructuredContent, &got)
+	if len(got.Columns) != 2 || got.Columns[0] != "city" || got.Columns[1] != "n" {
+		t.Errorf("columns = %v", got.Columns)
+	}
+	if got.RowCount != 2 || len(got.Rows) != 2 {
+		t.Fatalf("row_count = %d rows = %d, want 2/2", got.RowCount, len(got.Rows))
+	}
+	if !got.Truncated {
+		t.Error("truncated = false, want true")
+	}
+	if got.Rows[0][0] != "Chicago" {
+		t.Errorf("rows[0][0] = %v, want Chicago", got.Rows[0][0])
+	}
+	if got.DataAsOf != "2026-06-30T09:00:00Z" {
+		t.Errorf("data_as_of = %q", got.DataAsOf)
+	}
+}
+
+func TestCallQuerySQLPropagatesError(t *testing.T) {
+	// A guard rejection (or any adapter error) surfaces as an IsError result.
+	cs := connectSQL(t, &fakeSource{sqlErr: errors.New("query_sql: disallowed keyword DELETE")})
+	res, err := cs.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "query_sql",
+		Arguments: map[string]any{"query": "DELETE FROM property"},
+	})
+	if err != nil {
+		return // transport-level error is also an acceptable failure
+	}
+	if !res.IsError {
+		t.Fatal("expected IsError result when the query is rejected")
 	}
 }
 

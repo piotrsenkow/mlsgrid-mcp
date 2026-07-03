@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestLoadEnvOnly(t *testing.T) {
@@ -25,6 +26,38 @@ func TestLoadEnvOnly(t *testing.T) {
 	}
 	if cfg.Server.Name != "mlsgrid-mcp" {
 		t.Errorf("server.name = %q, want default mlsgrid-mcp", cfg.Server.Name)
+	}
+	// The SQL escape hatch is off by default with conservative limits.
+	if cfg.SQL.Enabled {
+		t.Error("sql.enabled = true, want default false")
+	}
+	if cfg.SQL.MaxRows != 1000 {
+		t.Errorf("sql.max_rows = %d, want default 1000", cfg.SQL.MaxRows)
+	}
+	if cfg.SQL.Timeout != 5*time.Second {
+		t.Errorf("sql.timeout = %v, want default 5s", cfg.SQL.Timeout)
+	}
+}
+
+func TestLoadSQLEnvOverride(t *testing.T) {
+	t.Setenv("MLSGRID_MCP_DATABASE_URL", "postgres://u:p@localhost:5432/mls")
+	t.Setenv("MLSGRID_MCP_SQL_ENABLED", "true")
+	t.Setenv("MLSGRID_MCP_SQL_MAX_ROWS", "250")
+	t.Setenv("MLSGRID_MCP_SQL_TIMEOUT", "10s") // exercises viper's duration decode hook
+	t.Chdir(t.TempDir())
+
+	cfg, err := Load("")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !cfg.SQL.Enabled {
+		t.Error("sql.enabled = false, want true from env")
+	}
+	if cfg.SQL.MaxRows != 250 {
+		t.Errorf("sql.max_rows = %d, want 250 from env", cfg.SQL.MaxRows)
+	}
+	if cfg.SQL.Timeout != 10*time.Second {
+		t.Errorf("sql.timeout = %v, want 10s from env", cfg.SQL.Timeout)
 	}
 }
 

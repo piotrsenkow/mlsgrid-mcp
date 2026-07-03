@@ -33,18 +33,35 @@ type Options struct {
 	// to DefaultSchema. It must be an existing identifier; it is validated and
 	// quoted, never interpolated raw.
 	Schema string
+	// SQLMaxRows is the default row cap for the opt-in query_sql escape hatch
+	// (per-call overridable up to a hard ceiling). Zero uses defaultSQLMaxRows.
+	SQLMaxRows int
+	// SQLTimeout is the statement_timeout applied to each query_sql execution.
+	// Zero uses defaultSQLTimeout.
+	SQLTimeout time.Duration
 }
 
-// Adapter implements mls.Source (and, later, mls.SQLQuerier) over a
-// mlsgrid-sync Postgres database.
+// Adapter implements mls.Source and mls.SQLQuerier over a mlsgrid-sync Postgres
+// database.
 type Adapter struct {
 	pool            *pgxpool.Pool
 	schema          string
 	contractVersion string
+	// currentUser / isSuperuser describe the connection role, read once at
+	// startup. They back SQLSafe: query_sql refuses to run over a superuser
+	// connection, which would bypass the least-privilege read-only role model.
+	currentUser string
+	isSuperuser bool
+	sqlMaxRows  int
+	sqlTimeout  time.Duration
 }
 
-// compile-time assertion that Adapter satisfies the Source contract.
-var _ mls.Source = (*Adapter)(nil)
+// compile-time assertions that Adapter satisfies the Source contract and the
+// optional SQL escape-hatch contract.
+var (
+	_ mls.Source     = (*Adapter)(nil)
+	_ mls.SQLQuerier = (*Adapter)(nil)
+)
 
 // New opens a connection pool to dsn, validates the schema contract version,
 // and returns a ready adapter. The caller owns the adapter's lifetime and must
@@ -73,6 +90,10 @@ func New(ctx context.Context, dsn string, opts Options) (*Adapter, error) {
 
 	a := &Adapter{pool: pool, schema: schema}
 	if err := a.assertContract(ctx); err != nil {
+		pool.Close()
+		return nil, err
+	}
+	if err := a.initSQL(ctx, opts); err != nil {
 		pool.Close()
 		return nil, err
 	}

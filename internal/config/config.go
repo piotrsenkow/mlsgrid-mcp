@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/spf13/viper"
 )
@@ -19,6 +20,7 @@ import (
 type Config struct {
 	Database Database `mapstructure:"database"`
 	Server   Server   `mapstructure:"server"`
+	SQL      SQL      `mapstructure:"sql"`
 }
 
 type Database struct {
@@ -35,6 +37,21 @@ type Server struct {
 	Name string `mapstructure:"name"`
 }
 
+// SQL configures the opt-in query_sql escape hatch. It is off by default and,
+// even when enabled, is only exposed over a connection that is not a superuser
+// (see the query_sql section of the README). Point the server at a
+// least-privilege read-only role before turning it on.
+type SQL struct {
+	// Enabled exposes the query_sql tool. Off by default.
+	Enabled bool `mapstructure:"enabled"`
+	// MaxRows is the default row cap per query (0 uses the adapter default). A
+	// hard ceiling is enforced regardless.
+	MaxRows int `mapstructure:"max_rows"`
+	// Timeout bounds each query's execution (statement_timeout). 0 uses the
+	// adapter default.
+	Timeout time.Duration `mapstructure:"timeout"`
+}
+
 func setDefaults(v *viper.Viper) {
 	// database.url defaults empty but must be registered: viper's AutomaticEnv
 	// only surfaces env overrides for keys it already knows, so without this
@@ -42,6 +59,10 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("database.url", "")
 	v.SetDefault("database.schema", "mlsgrid")
 	v.SetDefault("server.name", "mlsgrid-mcp")
+	// The escape hatch is off unless the operator opts in.
+	v.SetDefault("sql.enabled", false)
+	v.SetDefault("sql.max_rows", 1000)
+	v.SetDefault("sql.timeout", "5s")
 }
 
 // Load reads configuration from path. If path is empty it searches
