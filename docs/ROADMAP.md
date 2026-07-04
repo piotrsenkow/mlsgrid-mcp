@@ -46,6 +46,21 @@ this server reads is owned by [mlsgrid-sync](https://github.com/piotrsenkow/mlsg
   to the registry, and the awesome-mcp-servers PR — the first OSS MLS Grid MCP
   server.
 
+## Near-term (0.1.x)
+
+v0.1.0 is released. These were surfaced by the release + a live dogfood against
+real MRED data, and are tracked as
+[GitHub issues](https://github.com/piotrsenkow/mlsgrid-mcp/issues); the **v0.1.1**
+milestone holds the correctness papercuts.
+
+- [ ] **[#7](https://github.com/piotrsenkow/mlsgrid-mcp/issues/7) — `version` reports `dev` for `go install` builds** (v0.1.1). Fall back to `runtime/debug.ReadBuildInfo` when the ldflags version is unset — release binaries + the image are already correct.
+- [ ] **[#8](https://github.com/piotrsenkow/mlsgrid-mcp/issues/8) — `market_stats` inventory median includes $0 active listings** (v0.1.1). Guard `activeStats` with `list_price > 0`; closed metrics already guard `close_price > 0`.
+- [ ] **[#9](https://github.com/piotrsenkow/mlsgrid-mcp/issues/9) — `search_listings` total-count cost on large datasets** (v0.1.1). Cap / planner-estimate / opt-out for broad, unfiltered searches.
+- [ ] **[#10](https://github.com/piotrsenkow/mlsgrid-mcp/issues/10) — Cache `describe_dataset`** (short TTL; it runs ~7 group-bys per call).
+- [ ] **[#11](https://github.com/piotrsenkow/mlsgrid-mcp/issues/11) — Sort options for `search_listings`** (price / days-on-market; the cursor must encode the sort key).
+- [ ] **[#12](https://github.com/piotrsenkow/mlsgrid-mcp/issues/12) — Responsible-use / fair-housing note** in docs + tool descriptions.
+- [ ] **[#13](https://github.com/piotrsenkow/mlsgrid-mcp/issues/13) — OSS hygiene**: CONTRIBUTING, CHANGELOG, release badge.
+
 ## Post-1.0 candidates (demand-driven)
 
 - Streamable HTTP transport (drags in auth questions the go-sdk makes tractable)
