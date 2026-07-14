@@ -1,6 +1,7 @@
 # mlsgrid-mcp
 
 [![CI](https://github.com/piotrsenkow/mlsgrid-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/piotrsenkow/mlsgrid-mcp/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/piotrsenkow/mlsgrid-mcp?label=release)](https://github.com/piotrsenkow/mlsgrid-mcp/releases)
 [![Go Reference](https://pkg.go.dev/badge/github.com/piotrsenkow/mlsgrid-mcp.svg)](https://pkg.go.dev/github.com/piotrsenkow/mlsgrid-mcp)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 
